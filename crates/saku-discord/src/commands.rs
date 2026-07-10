@@ -5,8 +5,13 @@ pub enum BotCommand {
     Help,
     Stop,
     Steer(String),
-    Model { id: Option<String>, effort: Option<String> },
-    Effort { level: Option<String> },
+    Model {
+        id: Option<String>,
+        effort: Option<String>,
+    },
+    Effort {
+        level: Option<String>,
+    },
 }
 
 pub fn parse_command(prefix: &str, content: &str) -> Option<BotCommand> {

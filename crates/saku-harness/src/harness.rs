@@ -10,7 +10,9 @@ use crate::config::{Config, Effort};
 use crate::credentials::CredentialStore;
 use crate::index::{SharedIndex, WorkspaceIndex};
 use crate::provider::Provider;
-use crate::session::{new_run_control, Session, SessionState, SessionStore, StoreError, RunControl};
+use crate::session::{
+    RunControl, Session, SessionState, SessionStore, StoreError, new_run_control,
+};
 use crate::tools::{Tool, ToolContext, ToolError, ToolRegistry, ToolResult};
 use crate::types::ToolCall;
 

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
     arg_string, maybe_enforce_memory_cap, ok_text, record_snapshot, require_fresh_snapshot,

@@ -15,7 +15,8 @@ pub use codex::models::{
     is_supported_effort, supported_efforts,
 };
 pub use codex::{
-    CodexProvider, DeviceCodeInfo, LoginError, LoginNotify, create_codex_provider, login_device_code,
+    CodexProvider, DeviceCodeInfo, LoginError, LoginNotify, create_codex_provider,
+    login_device_code,
 };
 pub use fake::{FakeProvider, ScriptedResponse};
 

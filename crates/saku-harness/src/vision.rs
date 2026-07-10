@@ -28,7 +28,10 @@ pub fn is_image_mime(mime: &str) -> bool {
 }
 
 /// Decode, downscale, and re-encode as JPEG (or keep PNG for transparency-ish cases as JPEG).
-pub fn resize_for_provider(bytes: &[u8], mime_hint: Option<&str>) -> Result<(Vec<u8>, String), ImageError> {
+pub fn resize_for_provider(
+    bytes: &[u8],
+    mime_hint: Option<&str>,
+) -> Result<(Vec<u8>, String), ImageError> {
     let img = image::load_from_memory(bytes).map_err(|e| ImageError::Decode(e.to_string()))?;
     let resized = downscale(img, MAX_IMAGE_EDGE);
     let mut out = Vec::new();

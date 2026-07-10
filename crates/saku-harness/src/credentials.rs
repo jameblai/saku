@@ -90,11 +90,7 @@ impl CredentialStore {
     ///
     /// This is the only write path — refresh must run inside `modify` so
     /// concurrent refresh cannot race.
-    pub fn modify<F>(
-        &self,
-        provider_id: &str,
-        f: F,
-    ) -> Result<Option<Credential>, CredentialError>
+    pub fn modify<F>(&self, provider_id: &str, f: F) -> Result<Option<Credential>, CredentialError>
     where
         F: FnOnce(Option<Credential>) -> Result<Option<Credential>, CredentialError>,
     {
@@ -252,12 +248,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let store = CredentialStore::open(tmp.path()).unwrap();
         store
-            .set(
-                "codex",
-                Credential::ApiKey {
-                    key: "k".into(),
-                },
-            )
+            .set("codex", Credential::ApiKey { key: "k".into() })
             .unwrap();
         store.delete("codex").unwrap();
         assert_eq!(store.read("codex").unwrap(), None);
@@ -268,12 +259,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let store = CredentialStore::open(tmp.path()).unwrap();
         store
-            .set(
-                "codex",
-                Credential::ApiKey {
-                    key: "k".into(),
-                },
-            )
+            .set("codex", Credential::ApiKey { key: "k".into() })
             .unwrap();
         let mode = fs::metadata(store.path()).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
@@ -284,12 +270,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let store = Arc::new(CredentialStore::open(tmp.path()).unwrap());
         store
-            .set(
-                "codex",
-                Credential::ApiKey {
-                    key: "0".into(),
-                },
-            )
+            .set("codex", Credential::ApiKey { key: "0".into() })
             .unwrap();
 
         let barrier = Arc::new(Barrier::new(8));

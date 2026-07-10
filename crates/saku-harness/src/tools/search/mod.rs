@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::index::SharedIndex;
 use crate::path::resolve_in_workspace;
@@ -156,10 +156,7 @@ impl Tool for LsTool {
 
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let state = ctx.session.snapshot().await;
-        let path_arg = args
-            .get("path")
-            .and_then(|v| v.as_str())
-            .unwrap_or(".");
+        let path_arg = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
         let memory = crate::memory::memory_path(&ctx.session.inner.data_dir);
         let dir = resolve_in_workspace(
             &ctx.session.inner.workspace,

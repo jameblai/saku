@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use saku_harness::compaction::{compact_messages, default_local_summarize, DEFAULT_KEEP_RECENT};
+use saku_harness::compaction::{DEFAULT_KEEP_RECENT, compact_messages, default_local_summarize};
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::FakeProvider;
 use saku_harness::types::Message;
@@ -29,7 +29,8 @@ fn compaction_entry_replays_into_summary_plus_tail() {
         store.append_message("thread-c", &msg).unwrap();
         messages.push(msg);
     }
-    let compacted = compact_messages(&messages, DEFAULT_KEEP_RECENT, default_local_summarize).unwrap();
+    let compacted =
+        compact_messages(&messages, DEFAULT_KEEP_RECENT, default_local_summarize).unwrap();
     store
         .append_compaction("thread-c", &compacted.summary)
         .unwrap();

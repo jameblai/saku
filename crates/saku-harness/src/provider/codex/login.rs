@@ -246,7 +246,7 @@ fn now_ms() -> u64 {
 
 fn base64_url_decode(input: &str) -> Result<Vec<u8>, ()> {
     let mut s = input.replace('-', "+").replace('_', "/");
-    while s.len() % 4 != 0 {
+    while !s.len().is_multiple_of(4) {
         s.push('=');
     }
     base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s).map_err(|_| ())

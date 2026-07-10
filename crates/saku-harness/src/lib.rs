@@ -2,9 +2,9 @@
 //!
 //! No Discord / Serenity types live in this crate.
 
+pub mod compaction;
 pub mod config;
 pub mod credentials;
-pub mod compaction;
 pub mod harness;
 pub mod index;
 pub mod memory;

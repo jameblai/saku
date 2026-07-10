@@ -30,11 +30,7 @@ mod tests {
 
     #[test]
     fn includes_workspace_cwd_and_memory() {
-        let text = build_system_prompt(
-            Path::new("/ws"),
-            Path::new("/ws/proj"),
-            "likes rust",
-        );
+        let text = build_system_prompt(Path::new("/ws"), Path::new("/ws/proj"), "likes rust");
         assert!(text.contains("Workspace: /ws"));
         assert!(text.contains("Working Directory: /ws/proj"));
         assert!(text.contains("likes rust"));

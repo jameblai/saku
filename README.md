@@ -47,3 +47,11 @@ Discord’s threading is ideal for agents — work and context stay in one place
 - Fast file search (fff)
 - A minimal system prompt
 - No permission popups
+
+## Contributing
+
+This is mostly a personal project. Small, focused PRs are welcome — big drive-by refactors or thousand-line dumps probably aren't. If you're unsure whether something fits, open an issue first.
+
+## License
+
+MIT

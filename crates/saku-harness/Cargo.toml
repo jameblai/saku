@@ -29,3 +29,4 @@ url = "2"
 tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util", "test-util"] }
+wiremock = "0.6.5"

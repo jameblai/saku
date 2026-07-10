@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use saku_harness::{
     ALLOWED_MODELS, Config, Effort, Harness, RunEvent, UserTurn, background_tools, file_tools,
-    is_allowed_model, is_supported_effort, search_tools, shell_tools, supported_efforts,
+    is_allowed_model, is_supported_effort, register_web_tools, search_tools, shell_tools,
+    supported_efforts,
 };
 use serenity::Client;
 use serenity::all::{
@@ -493,6 +494,7 @@ pub async fn register_default_tools(harness: &Harness) {
     for tool in search_tools(Arc::clone(harness.index())) {
         harness.register_tool(tool).await;
     }
+    register_web_tools(harness).await;
 }
 
 #[cfg(test)]

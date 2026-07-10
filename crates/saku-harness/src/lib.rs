@@ -37,8 +37,9 @@ pub use status::{
     format_status,
 };
 pub use tools::{
-    Tool, ToolError, ToolResult, background_tools, file_tools, search_tools, shell_tools,
+    Tool, ToolError, ToolResult, background_tools, file_tools, register_web_tools, search_tools,
+    shell_tools, web_tools, web_tools_from_store,
 };
 pub use types::{ContentPart, Message, Request, RunEvent, TokenUsage, UserTurn};
 pub use vision::{is_image_mime, is_image_path, resize_for_provider};
-pub use web_backend::{EXA_WEB_BACKEND_ID, login_exa_api_key};
+pub use web_backend::{EXA_WEB_BACKEND_ID, ExaClient, ExaError, login_exa_api_key};

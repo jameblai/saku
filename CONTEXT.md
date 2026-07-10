@@ -53,8 +53,12 @@ _Avoid_: token, secret, api key (as the umbrella term)
 
 
 **Login**:
-A host CLI flow (`saku login <provider>`) that obtains and stores a Credential for a Provider (Codex uses device-code OAuth). Not performed inside Discord. Implemented in `saku-cli`, writing via the harness Credential store.
+A host CLI flow (`saku login <provider>`) that obtains and stores a Credential for a Provider (Codex uses device-code OAuth). Not performed inside Discord. Implemented in `saku-cli`, writing via the harness Credential store. Also run as the final step of Setup.
 _Avoid_: /login, sign-in (as product UI inside Discord)
+
+**Setup**:
+A host CLI flow (`saku setup`) that collects Discord bot token and Authorised User id(s) (one prompt; comma- or space-separated snowflakes), writes those required fields into `config.toml` in the Data Dir (optional keys left to defaults; re-runs preserve existing optional keys), then runs Codex Login. `saku` auto-enters Setup when config is missing or cannot be loaded (IO, parse, or missing required fields), with best-effort prefill; if config is present but the Codex Credential is missing, it auto-runs Login only. Re-runs prefill existing config values and always finish with Login. When Setup/Login was entered automatically from bare `saku`, success continues into the bot; explicit `saku setup` exits after success.
+_Avoid_: onboarding, install, init, first-run wizard (as product terms)
 
 
 **Tool**:

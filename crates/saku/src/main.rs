@@ -2,44 +2,42 @@
 //!
 //! `saku` runs the Discord bot; `saku login` delegates to `saku-cli`.
 
-use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use saku::cli::{Command, parse_args};
 use saku_discord::run_bot;
-use saku_harness::{Config, CredentialStore, create_codex_provider, Harness};
+use saku_harness::{Config, CredentialStore, Harness, create_codex_provider};
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let mut args = env::args().skip(1).collect::<Vec<_>>();
-    if args.first().map(String::as_str) == Some("login") {
-        args.remove(0);
-        return match args.as_slice() {
-            [cmd] if cmd == "codex" => match saku_cli::login_codex(None).await {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(err) => {
-                    eprintln!("saku login codex: {err}");
-                    ExitCode::FAILURE
-                }
-            },
-            _ => {
-                eprintln!("usage: saku login codex");
+    let command = match parse_args(std::env::args_os().skip(1)) {
+        Ok(c) => c,
+        Err(err) => {
+            let _ = err.print();
+            return ExitCode::from(u8::try_from(err.exit_code()).unwrap_or(1));
+        }
+    };
+
+    match command {
+        Command::LoginCodex => match saku_cli::login_codex(None).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("saku login codex: {err}");
                 ExitCode::FAILURE
             }
-        };
+        },
+        Command::Run { config } => run_bot_cmd(config).await,
     }
+}
 
-    let config_path = args
-        .iter()
-        .position(|a| a == "--config")
-        .and_then(|i| args.get(i + 1).cloned())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .expect("home")
-                .join(".saku/config.toml")
-        });
+async fn run_bot_cmd(config: Option<PathBuf>) -> ExitCode {
+    let config_path = config.unwrap_or_else(|| {
+        dirs::home_dir()
+            .expect("home")
+            .join(".saku/config.toml")
+    });
 
     let config = match Config::load(&config_path) {
         Ok(c) => c,

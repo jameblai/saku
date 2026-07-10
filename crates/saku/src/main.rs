@@ -75,7 +75,7 @@ async fn run_bot_cmd(config: Option<PathBuf>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    saku_discord::bot::register_default_tools(&harness).await;
+    harness.register_default_tools().await;
 
     // Keep Arc alive for clarity; harness is Clone.
     let _ = Arc::new(());

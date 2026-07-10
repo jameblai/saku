@@ -1,11 +1,8 @@
 //! Serenity bot wiring.
 
-use std::sync::Arc;
-
 use saku_harness::{
-    ALLOWED_MODELS, Config, Effort, Harness, RunEvent, UserTurn, background_tools, file_tools,
-    is_allowed_model, is_supported_effort, register_web_tools, search_tools, shell_tools,
-    supported_efforts,
+    ALLOWED_MODELS, Config, Effort, Harness, RunEvent, UserTurn, is_allowed_model,
+    is_supported_effort, supported_efforts,
 };
 use serenity::Client;
 use serenity::all::{
@@ -478,23 +475,6 @@ fn parse_effort(s: &str) -> Option<Effort> {
         "max" => Some(Effort::Max),
         _ => None,
     }
-}
-
-/// Register default v1 tools on a Harness.
-pub async fn register_default_tools(harness: &Harness) {
-    for tool in file_tools() {
-        harness.register_tool(tool).await;
-    }
-    for tool in shell_tools() {
-        harness.register_tool(tool).await;
-    }
-    for tool in background_tools() {
-        harness.register_tool(tool).await;
-    }
-    for tool in search_tools(Arc::clone(harness.index())) {
-        harness.register_tool(tool).await;
-    }
-    register_web_tools(harness).await;
 }
 
 #[cfg(test)]

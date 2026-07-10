@@ -3,6 +3,7 @@
 pub mod file;
 pub mod search;
 pub mod shell;
+pub mod web;
 
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ use crate::types::{ContentPart, ToolDefinition};
 pub use file::{EditTool, ReadTool, WriteTool, file_tools};
 pub use search::{FindTool, GrepTool, LsTool, search_tools};
 pub use shell::{BashTool, CdTool, shell_tools};
+pub use web::{register_web_tools, web_tools, web_tools_from_store};
 
 #[derive(Debug, Error)]
 pub enum ToolError {

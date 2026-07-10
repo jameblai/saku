@@ -1,0 +1,40 @@
+[
+  {
+    "tag_name": "v0.2.0-nightly.20260711.2",
+    "prerelease": true,
+    "draft": false,
+    "assets": [
+      {
+        "name": "saku-linux-x86_64.tar.gz",
+        "browser_download_url": "https://example.test/v0.2.0-nightly.20260711.2/x86_64"
+      },
+      {
+        "name": "saku-linux-aarch64.tar.gz",
+        "browser_download_url": "https://example.test/v0.2.0-nightly.20260711.2/aarch64"
+      },
+      {
+        "name": "SHA256SUMS",
+        "browser_download_url": "https://example.test/v0.2.0-nightly.20260711.2/sums"
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.2.0",
+    "prerelease": false,
+    "draft": false,
+    "assets": [
+      {
+        "name": "saku-linux-x86_64.tar.gz",
+        "browser_download_url": "https://example.test/v0.2.0/x86_64"
+      },
+      {
+        "name": "saku-linux-aarch64.tar.gz",
+        "browser_download_url": "https://example.test/v0.2.0/aarch64"
+      },
+      {
+        "name": "SHA256SUMS",
+        "browser_download_url": "https://example.test/v0.2.0/sums"
+      }
+    ]
+  }
+]

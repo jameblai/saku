@@ -19,7 +19,7 @@
 curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.1.0/scripts/install.sh | bash
 ```
 
-This installs a prebuilt Linux binary for x86_64 or aarch64, guides you through Setup, and starts a user systemd service. To track nightly Releases instead, run:
+This installs a prebuilt Linux binary for x86_64 or aarch64, guides you through Setup, and starts a user systemd service. To use the nightly Release Channel instead, run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.1.0/scripts/install.sh | bash -s -- --channel nightly

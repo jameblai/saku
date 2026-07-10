@@ -162,6 +162,15 @@ impl Config {
         })
     }
 
+    /// Read **Release Channel** for Update without requiring a full bot config.
+    ///
+    /// Missing `release_channel` defaults to **stable**. A missing file is an error.
+    pub fn load_release_channel(path: impl AsRef<Path>) -> Result<ReleaseChannel, ConfigError> {
+        let text = fs::read_to_string(path.as_ref())?;
+        let raw: RawConfig = toml::from_str(&text)?;
+        Ok(raw.release_channel.unwrap_or(ReleaseChannel::Stable))
+    }
+
     /// Best-effort prefill for Setup: token and Authorised User ids if readable.
     pub fn read_setup_prefill(path: impl AsRef<Path>) -> (Option<String>, Option<Vec<String>>) {
         let Ok(text) = fs::read_to_string(path) else {
@@ -353,6 +362,22 @@ release_channel = "nightly"
         assert_eq!(cfg.authorized_user_ids, vec!["9"]);
         assert_eq!(cfg.command_prefix, "bot");
         assert_eq!(cfg.workspace, PathBuf::from("/tmp/ws"));
+    }
+
+    #[test]
+    fn load_release_channel_defaults_to_stable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, r#"release_channel = "nightly""#).unwrap();
+        assert_eq!(
+            Config::load_release_channel(&path).expect("load"),
+            ReleaseChannel::Nightly
+        );
+        std::fs::write(&path, "discord_token = \"tok\"\n").unwrap();
+        assert_eq!(
+            Config::load_release_channel(&path).expect("load"),
+            ReleaseChannel::Stable
+        );
     }
 
     #[test]

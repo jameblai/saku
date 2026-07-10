@@ -58,6 +58,31 @@ tar -xzf "$tmp/$asset" -C "$tmp" saku
 install -d "$HOME/.local/bin"
 install -m 0755 "$tmp/saku" "$HOME/.local/bin/saku"
 
+write_release_channel() {
+  local config="$HOME/.saku/config.toml"
+  mkdir -p "$(dirname "$config")"
+  if [[ -f "$config" ]]; then
+    sed -i '/^[[:space:]]*release_channel[[:space:]]*=/d' "$config"
+  fi
+  printf '\nrelease_channel = "%s"\n' "$channel" >> "$config"
+  chmod 600 "$config"
+}
+
+ensure_local_bin_on_path() {
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *)
+      local rc="$HOME/.profile"
+      [[ "${SHELL:-}" == */zsh ]] && rc="$HOME/.zshrc"
+      printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
+      echo "Added ~/.local/bin to PATH in $rc"
+      ;;
+  esac
+}
+
+write_release_channel
+ensure_local_bin_on_path
+
 interactive=false
 if [[ -t 1 && -e /dev/tty && "$assume_yes" == false ]]; then interactive=true; fi
 if [[ "$interactive" == false ]]; then
@@ -66,32 +91,12 @@ if [[ "$interactive" == false ]]; then
   exit 0
 fi
 
-config="$HOME/.saku/config.toml"
-mkdir -p "$(dirname "$config")"
-if [[ -f "$config" ]]; then
-  sed -i '/^[[:space:]]*release_channel[[:space:]]*=/d' "$config"
-fi
-printf '\nrelease_channel = "%s"\n' "$channel" >> "$config"
-chmod 600 "$config"
-
-case ":$PATH:" in
-  *":$HOME/.local/bin:"*) ;;
-  *)
-    rc="$HOME/.profile"
-    [[ "${SHELL:-}" == */zsh ]] && rc="$HOME/.zshrc"
-    printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$rc"
-    echo "Added ~/.local/bin to PATH in $rc"
-    ;;
-esac
-
 "$HOME/.local/bin/saku" setup < /dev/tty
 unit_dir="$HOME/.config/systemd/user"
 mkdir -p "$unit_dir"
 cat > "$unit_dir/saku.service" <<EOF
 [Unit]
 Description=Saku Discord coding agent
-After=network-online.target
-Wants=network-online.target
 
 [Service]
 ExecStart=$HOME/.local/bin/saku

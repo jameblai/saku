@@ -12,6 +12,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const RELEASES_URL: &str = "https://api.github.com/repos/jameblai/saku/releases?per_page=100";
+const LATEST_STABLE_URL: &str = "https://api.github.com/repos/jameblai/saku/releases/latest";
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct GithubAsset {
@@ -49,22 +50,30 @@ pub fn artifact_arch(arch: &str) -> Result<&'static str, String> {
 }
 
 /// Select the newest usable Release and its architecture-specific assets.
+///
+/// For **stable**, pass `stable_tag` from GitHub `releases/latest` so Update matches Install.
+/// When `stable_tag` is `None` (unit tests), the first non-prerelease Release is used.
 pub fn resolve_release(
     channel: ReleaseChannel,
     arch: &str,
     releases: &[GithubRelease],
+    stable_tag: Option<&str>,
 ) -> Result<DownloadTarget, String> {
     let arch = artifact_arch(arch)?;
     let release = releases
         .iter()
         .find(|release| {
-            !release.draft
-                && match channel {
-                    ReleaseChannel::Stable => !release.prerelease,
-                    ReleaseChannel::Nightly => {
-                        release.prerelease && release.tag_name.contains("-nightly.")
-                    }
+            if release.draft {
+                return false;
+            }
+            match channel {
+                ReleaseChannel::Stable => {
+                    !release.prerelease && stable_tag.is_none_or(|tag| release.tag_name == tag)
                 }
+                ReleaseChannel::Nightly => {
+                    release.prerelease && release.tag_name.contains("-nightly.")
+                }
+            }
         })
         .ok_or_else(|| format!("no {channel} Release found"))?;
     let asset_name = format!("saku-linux-{arch}.tar.gz");
@@ -111,18 +120,18 @@ pub fn verify_checksum(name: &str, bytes: &[u8], sums: &str) -> Result<(), Strin
 pub async fn update() -> Result<(), String> {
     let home = dirs::home_dir().ok_or_else(|| "could not determine home directory".to_string())?;
     let config_path = home.join(".saku/config.toml");
-    let config = load_update_config(&config_path)?;
-    update_from_channel(config.release_channel, &home.join(".local/bin/saku")).await
+    let channel = load_update_channel(&config_path)?;
+    update_from_channel(channel, &home.join(".local/bin/saku")).await
 }
 
-fn load_update_config(config_path: &Path) -> Result<Config, String> {
+fn load_update_channel(config_path: &Path) -> Result<ReleaseChannel, String> {
     if !config_path.exists() {
         return Err(format!(
             "config not found at {}; run `saku setup` first",
             config_path.display()
         ));
     }
-    Config::load(config_path).map_err(|e| e.to_string())
+    Config::load_release_channel(config_path).map_err(|e| e.to_string())
 }
 
 async fn update_from_channel(channel: ReleaseChannel, destination: &Path) -> Result<(), String> {
@@ -130,6 +139,10 @@ async fn update_from_channel(channel: ReleaseChannel, destination: &Path) -> Res
         .user_agent(concat!("saku/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| e.to_string())?;
+    let stable_tag = match channel {
+        ReleaseChannel::Stable => Some(fetch_latest_stable_tag(&client).await?),
+        ReleaseChannel::Nightly => None,
+    };
     let releases = client
         .get(RELEASES_URL)
         .send()
@@ -140,15 +153,38 @@ async fn update_from_channel(channel: ReleaseChannel, destination: &Path) -> Res
         .json::<Vec<GithubRelease>>()
         .await
         .map_err(|e| e.to_string())?;
-    let target = resolve_release(channel, std::env::consts::ARCH, &releases)?;
+    let target = resolve_release(
+        channel,
+        std::env::consts::ARCH,
+        &releases,
+        stable_tag.as_deref(),
+    )?;
     let archive = download(&client, &target.asset_url).await?;
     let sums = String::from_utf8(download(&client, &target.checksums_url).await?)
         .map_err(|_| "SHA256SUMS was not UTF-8".to_string())?;
     verify_checksum(&target.asset_name, &archive, &sums)?;
-    install_archive(&archive, destination)?;
+    replace_binary_from_archive(&archive, destination)?;
     println!("Updated Saku to {} ({channel}).", target.tag);
     restart_service_if_active();
     Ok(())
+}
+
+async fn fetch_latest_stable_tag(client: &reqwest::Client) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct LatestRelease {
+        tag_name: String,
+    }
+    let release = client
+        .get(LATEST_STABLE_URL)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json::<LatestRelease>()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(release.tag_name)
 }
 
 async fn download(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
@@ -165,7 +201,7 @@ async fn download(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String
         .to_vec())
 }
 
-fn install_archive(archive: &[u8], destination: &Path) -> Result<(), String> {
+fn replace_binary_from_archive(archive: &[u8], destination: &Path) -> Result<(), String> {
     let decoder = GzDecoder::new(Cursor::new(archive));
     let mut tar = tar::Archive::new(decoder);
     let mut binary = Vec::new();
@@ -212,6 +248,7 @@ fn restart_service_if_active() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn release(tag: &str, prerelease: bool) -> GithubRelease {
         GithubRelease {
@@ -232,38 +269,47 @@ mod tests {
         }
     }
 
+    fn releases_from_fixture(name: &str) -> Vec<GithubRelease> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name);
+        let text = fs::read_to_string(path).expect("fixture");
+        serde_json::from_str(&text).expect("deserialize fixture")
+    }
+
     #[test]
-    fn stable_resolves_latest_non_prerelease() {
-        let releases = [
-            release("v0.2.0-nightly.20260711.2", true),
-            release("v0.2.0", false),
-        ];
-        let target = resolve_release(ReleaseChannel::Stable, "x86_64", &releases).unwrap();
+    fn stable_resolves_latest_non_prerelease_from_fixture() {
+        let releases = releases_from_fixture("stable_latest.json");
+        let target =
+            resolve_release(ReleaseChannel::Stable, "x86_64", &releases, Some("v0.2.0")).unwrap();
         assert_eq!(target.tag, "v0.2.0");
         assert_eq!(target.asset_name, "saku-linux-x86_64.tar.gz");
     }
 
     #[test]
-    fn stable_fixture_can_resolve_a_pinned_tag() {
-        let target = resolve_release(
-            ReleaseChannel::Stable,
-            "aarch64",
-            &[release("v0.1.0", false)],
-        )
-        .unwrap();
+    fn stable_resolves_pinned_tag_from_fixture() {
+        let releases = releases_from_fixture("stable_pinned.json");
+        let target =
+            resolve_release(ReleaseChannel::Stable, "aarch64", &releases, Some("v0.1.0")).unwrap();
         assert_eq!(target.tag, "v0.1.0");
         assert_eq!(target.asset_name, "saku-linux-aarch64.tar.gz");
     }
 
     #[test]
-    fn nightly_resolves_newest_nightly_prerelease() {
-        let releases = [
-            release("v0.2.0", false),
-            release("v0.2.0-nightly.20260711.3", true),
-            release("v0.2.0-nightly.20260711.2", true),
-        ];
-        let target = resolve_release(ReleaseChannel::Nightly, "aarch64", &releases).unwrap();
+    fn nightly_resolves_newest_nightly_from_fixture() {
+        let releases = releases_from_fixture("nightly_list.json");
+        let target = resolve_release(ReleaseChannel::Nightly, "aarch64", &releases, None).unwrap();
         assert_eq!(target.tag, "v0.2.0-nightly.20260711.3");
+    }
+
+    #[test]
+    fn stable_without_tag_uses_first_non_prerelease() {
+        let releases = [
+            release("v0.2.0-nightly.20260711.2", true),
+            release("v0.2.0", false),
+        ];
+        let target = resolve_release(ReleaseChannel::Stable, "x86_64", &releases, None).unwrap();
+        assert_eq!(target.tag, "v0.2.0");
     }
 
     #[test]
@@ -281,8 +327,19 @@ mod tests {
     fn missing_config_explains_setup_next_step() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        let err = load_update_config(&path).unwrap_err();
+        let err = load_update_channel(&path).unwrap_err();
         assert!(err.contains("config not found"));
         assert!(err.contains("saku setup"));
+    }
+
+    #[test]
+    fn channel_only_config_loads_for_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, r#"release_channel = "nightly""#).unwrap();
+        assert_eq!(
+            load_update_channel(&path).expect("load"),
+            ReleaseChannel::Nightly
+        );
     }
 }

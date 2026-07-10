@@ -28,7 +28,7 @@ use crate::types::{
 
 pub use store::{SessionEntry, SessionHeader, SessionStore, StoreError};
 
-const MAX_TOOL_ROUNDS: usize = 40;
+const MAX_TOOL_ROUNDS: usize = 90;
 
 /// In-memory Session state rebuilt from the Session Store.
 #[derive(Debug, Clone)]

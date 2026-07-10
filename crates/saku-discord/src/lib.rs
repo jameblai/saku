@@ -1,3 +1,9 @@
 //! Discord adapter: Serenity gateway → Harness.
-//!
-//! Stub until Discord tickets land.
+
+pub mod bot;
+mod chunk;
+mod commands;
+mod progress;
+
+pub use bot::run_bot;
+pub use chunk::chunk_message;

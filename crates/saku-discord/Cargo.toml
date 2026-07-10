@@ -8,3 +8,7 @@ description = "Saku Discord adapter (Serenity)"
 
 [dependencies]
 saku-harness = { workspace = true }
+serde_json = "1"
+serenity = { version = "0.12", default-features = false, features = ["client", "gateway", "model", "cache", "http", "rustls_backend"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+tracing = "0.1"

@@ -8,6 +8,10 @@ use std::sync::Arc;
 use futures::StreamExt;
 use tokio::sync::{Mutex, mpsc, watch};
 
+use crate::compaction::{
+    compact_messages, default_local_summarize, estimate_tokens, DEFAULT_COMPACTION_TOKEN_LIMIT,
+    DEFAULT_KEEP_RECENT,
+};
 use crate::config::Effort;
 use crate::harness::HarnessInner;
 use crate::memory::read_memory;
@@ -138,7 +142,41 @@ impl Session {
 
         for _round in 0..MAX_TOOL_ROUNDS {
             let (model, effort, messages, cwd, workspace, data_dir, tools) = {
-                let state = self.state.lock().await;
+                let mut state = self.state.lock().await;
+                // Compaction check before each Provider call.
+                let memory = read_memory(&self.inner.data_dir).unwrap_or_default();
+                let system_probe = build_system_prompt(&self.inner.workspace, &state.cwd, &memory);
+                if estimate_tokens(&state.messages, &system_probe) > DEFAULT_COMPACTION_TOKEN_LIMIT {
+                    if let Some(result) =
+                        compact_messages(&state.messages, DEFAULT_KEEP_RECENT, default_local_summarize)
+                    {
+                        self.inner
+                            .store
+                            .append_compaction(&self.thread_id, &result.summary)
+                            .map_err(|e| RunError::Store(e.to_string()))?;
+                        // After compaction entry, re-append kept messages so replay rebuilds the tail.
+                        for msg in &result.kept_messages {
+                            // Skip rewriting the synthetic summary as a message entry — it's in compaction.
+                            if msg
+                                .content
+                                .first()
+                                .and_then(|c| match c {
+                                    crate::types::ContentPart::Text { text } => Some(text.as_str()),
+                                    _ => None,
+                                })
+                                .is_some_and(|t| t.starts_with("[compaction summary"))
+                            {
+                                continue;
+                            }
+                            self.inner
+                                .store
+                                .append_message(&self.thread_id, msg)
+                                .map_err(|e| RunError::Store(e.to_string()))?;
+                        }
+                        state.messages = result.kept_messages;
+                    }
+                }
+
                 let tools = self.inner.tools.lock().await.definitions();
                 (
                     state.model.clone(),

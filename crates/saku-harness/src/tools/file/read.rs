@@ -31,9 +31,19 @@ impl Tool for ReadTool {
         let path_arg = super::arg_string(&args, "path")?;
         let path = resolve_tool_path(ctx.session, &path_arg).await?;
         let bytes = std::fs::read(&path).map_err(|e| ToolError::Message(e.to_string()))?;
-        // Text for now; Vision ticket handles image bytes as ContentPart::Image.
-        let text = String::from_utf8_lossy(&bytes).into_owned();
         record_snapshot(ctx.session, &path).await?;
+
+        if crate::vision::is_image_path(&path) {
+            let (resized, mime) = crate::vision::resize_for_provider(&bytes, None)
+                .map_err(|e| ToolError::Message(e.to_string()))?;
+            return Ok(ToolResult {
+                content: vec![crate::types::ContentPart::image(mime, resized)],
+                is_error: false,
+                details: None,
+            });
+        }
+
+        let text = String::from_utf8_lossy(&bytes).into_owned();
         Ok(ok_text(text))
     }
 }

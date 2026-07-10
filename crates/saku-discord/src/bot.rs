@@ -132,11 +132,15 @@ impl EventHandler for Handler {
         };
 
         let text = strip_mention(&msg.content, bot_id).trim().to_string();
-        if text.is_empty() {
+        let images = download_attachments(&ctx, &msg).await;
+        if text.is_empty() && images.is_empty() {
             return;
         }
 
-        let turn = UserTurn::text(text);
+        let turn = UserTurn {
+            text,
+            images,
+        };
         if let Err(err) = self
             .enqueue_or_run(&ctx, &msg, &thread_id, channel_id, turn)
             .await
@@ -469,6 +473,32 @@ async fn react_ok(ctx: &Context, msg: &Message) {
     let _ = msg
         .react(ctx, ReactionType::Unicode(CHECKMARK.into()))
         .await;
+}
+
+async fn download_attachments(ctx: &Context, msg: &Message) -> Vec<saku_harness::ContentPart> {
+    let mut images = Vec::new();
+    for attachment in &msg.attachments {
+        let mime = attachment
+            .content_type
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".into());
+        if !saku_harness::is_image_mime(&mime)
+            && !saku_harness::is_image_path(std::path::Path::new(&attachment.filename))
+        {
+            continue;
+        }
+        match attachment.download().await {
+            Ok(bytes) => match saku_harness::resize_for_provider(&bytes, Some(&mime)) {
+                Ok((resized, out_mime)) => {
+                    images.push(saku_harness::ContentPart::image(out_mime, resized));
+                }
+                Err(err) => warn!("image resize failed for {}: {err}", attachment.filename),
+            },
+            Err(err) => warn!("attachment download failed: {err}"),
+        }
+    }
+    let _ = ctx;
+    images
 }
 
 fn parse_effort(s: &str) -> Option<Effort> {

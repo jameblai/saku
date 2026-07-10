@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod credentials;
+pub mod compaction;
 pub mod harness;
 pub mod index;
 pub mod memory;
@@ -13,6 +14,7 @@ pub mod provider;
 pub mod session;
 pub mod tools;
 pub mod types;
+pub mod vision;
 
 pub use config::{Config, ConfigError, Effort};
 pub use credentials::{Credential, CredentialError, CredentialStore};
@@ -28,3 +30,4 @@ pub use provider::{
 pub use session::{RunHandle, Session, SessionState, SessionStore};
 pub use tools::{Tool, ToolError, ToolResult, file_tools, search_tools, shell_tools};
 pub use types::{ContentPart, Message, Request, RunEvent, UserTurn};
+pub use vision::{is_image_mime, is_image_path, resize_for_provider};

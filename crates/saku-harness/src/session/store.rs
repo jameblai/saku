@@ -179,8 +179,17 @@ impl SessionStore {
                         mtime_secs,
                     });
                 }
-                SessionEntry::Compaction { .. } => {
-                    // Applied in the Compaction ticket; for now keep messages as-is.
+                SessionEntry::Compaction { summary } => {
+                    // Replace transcript with summary + keep nothing from before;
+                    // subsequent message entries after this line are the live tail.
+                    state.messages = vec![crate::types::Message {
+                        role: crate::types::Role::User,
+                        content: vec![crate::types::ContentPart::text(format!(
+                            "[compaction summary of earlier turns]\n{summary}"
+                        ))],
+                        tool_call_id: None,
+                        tool_calls: Vec::new(),
+                    }];
                 }
             }
         }
@@ -237,6 +246,15 @@ impl SessionStore {
             thread_id,
             &SessionEntry::EffortChange {
                 effort: effort.as_str().into(),
+            },
+        )
+    }
+
+    pub fn append_compaction(&self, thread_id: &str, summary: &str) -> Result<(), StoreError> {
+        self.append(
+            thread_id,
+            &SessionEntry::Compaction {
+                summary: summary.into(),
             },
         )
     }

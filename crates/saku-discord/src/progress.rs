@@ -51,3 +51,22 @@ fn truncate(s: &str, max: usize) -> String {
         t
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn formats_progress_with_emoji() {
+        let text = format_progress(&[("bash".into(), "\"ls\"".into()), ("read".into(), "\"a.rs\"".into())]);
+        assert!(text.contains("💻 bash:"));
+        assert!(text.contains("📖 read:"));
+    }
+
+    #[test]
+    fn args_preview_prefers_command_path_pattern() {
+        assert_eq!(args_preview(&json!({"command": "pwd"})), "\"pwd\"");
+        assert_eq!(args_preview(&json!({"path": "src"})), "\"src\"");
+    }
+}

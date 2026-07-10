@@ -13,8 +13,13 @@ use crate::session::{Session, SessionState, SessionStore, StoreError};
 use crate::tools::{Tool, ToolContext, ToolError, ToolRegistry, ToolResult};
 use crate::types::ToolCall;
 
+pub(crate) struct LiveSession {
+    pub state: Arc<Mutex<SessionState>>,
+    pub abort_tx: Arc<Mutex<watch::Sender<bool>>>,
+}
+
 /// Shared Harness state.
-pub struct HarnessInner {
+pub(crate) struct HarnessInner {
     pub workspace: PathBuf,
     pub data_dir: PathBuf,
     pub default_model: String,
@@ -23,7 +28,7 @@ pub struct HarnessInner {
     pub store: SessionStore,
     pub credentials: CredentialStore,
     pub tools: Mutex<ToolRegistry>,
-    pub sessions: Mutex<HashMap<String, Arc<Mutex<SessionState>>>>,
+    pub sessions: Mutex<HashMap<String, LiveSession>>,
 }
 
 impl HarnessInner {
@@ -38,10 +43,10 @@ impl HarnessInner {
                 .get(&call.name)
                 .ok_or_else(|| ToolError::Unknown(call.name.clone()))?
         };
-        let (_abort_tx, abort_rx) = watch::channel(false);
+        let abort = session.abort_tx.lock().await.subscribe();
         let ctx = ToolContext {
             session,
-            abort: abort_rx,
+            abort,
             progress: None,
         };
         tool.execute(&ctx, call.arguments.clone()).await
@@ -93,11 +98,12 @@ impl Harness {
     pub async fn session(&self, thread_id: impl Into<String>) -> Result<Session, HarnessError> {
         let thread_id = thread_id.into();
         let mut sessions = self.inner.sessions.lock().await;
-        if let Some(state) = sessions.get(&thread_id) {
+        if let Some(live) = sessions.get(&thread_id) {
             return Ok(Session {
                 thread_id,
                 inner: Arc::clone(&self.inner),
-                state: Arc::clone(state),
+                state: Arc::clone(&live.state),
+                abort_tx: Arc::clone(&live.abort_tx),
             });
         }
         let loaded = self.inner.store.load_or_create(
@@ -107,11 +113,20 @@ impl Harness {
             self.inner.default_effort,
         )?;
         let state = Arc::new(Mutex::new(loaded));
-        sessions.insert(thread_id.clone(), Arc::clone(&state));
+        let (abort_tx, _) = watch::channel(false);
+        let abort_tx = Arc::new(Mutex::new(abort_tx));
+        sessions.insert(
+            thread_id.clone(),
+            LiveSession {
+                state: Arc::clone(&state),
+                abort_tx: Arc::clone(&abort_tx),
+            },
+        );
         Ok(Session {
             thread_id,
             inner: Arc::clone(&self.inner),
             state,
+            abort_tx,
         })
     }
 }

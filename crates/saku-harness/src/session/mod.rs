@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 
 use crate::config::Effort;
 use crate::harness::HarnessInner;
@@ -43,6 +43,7 @@ pub struct Session {
     pub(crate) thread_id: String,
     pub(crate) inner: Arc<HarnessInner>,
     pub(crate) state: Arc<Mutex<SessionState>>,
+    pub(crate) abort_tx: Arc<Mutex<watch::Sender<bool>>>,
 }
 
 impl Session {
@@ -54,11 +55,21 @@ impl Session {
         self.state.lock().await.clone()
     }
 
+    /// Abort the active Run (and running bash) for later `stop` Bot Command wiring.
+    pub async fn stop(&self) {
+        let _ = self.abort_tx.lock().await.send(true);
+    }
+
+    pub(crate) async fn reset_abort(&self) {
+        let _ = self.abort_tx.lock().await.send(false);
+    }
+
     /// Start (or queue) a Run for this user turn.
     pub async fn run(&self, turn: UserTurn) -> RunHandle {
         let (tx, rx) = mpsc::unbounded_channel();
         let session = self.clone();
         tokio::spawn(async move {
+            session.reset_abort().await;
             if let Err(err) = session.execute_run(turn, tx.clone()).await {
                 let _ = tx.send(RunEvent::RunError {
                     message: err.to_string(),

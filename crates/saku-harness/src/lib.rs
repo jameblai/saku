@@ -20,5 +20,5 @@ pub use memory::{MEMORY_CHAR_LIMIT, MemoryError, memory_path, read_memory, valid
 pub use path::{PathError, resolve_in_workspace};
 pub use provider::{FakeProvider, Provider, ProviderError, ScriptedResponse};
 pub use session::{RunHandle, Session, SessionState, SessionStore};
-pub use tools::{Tool, ToolError, ToolResult, file_tools};
+pub use tools::{Tool, ToolError, ToolResult, file_tools, shell_tools};
 pub use types::{ContentPart, Message, Request, RunEvent, UserTurn};

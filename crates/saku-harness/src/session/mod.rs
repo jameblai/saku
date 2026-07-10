@@ -17,7 +17,11 @@ use crate::config::Effort;
 use crate::harness::HarnessInner;
 use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
 use crate::prompt::build_system_prompt;
-use crate::types::{Message, ProviderEvent, Request, Role, RunEvent, ToolCall, UserTurn};
+use crate::provider::codex::models::{context_window_for, rates_for};
+use crate::status::{CodexAccountStatus, RunState, StatusReport, estimate_cost_usd};
+use crate::types::{
+    Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, UserTurn,
+};
 
 pub use store::{SessionEntry, SessionHeader, SessionStore, StoreError};
 
@@ -32,6 +36,11 @@ pub struct SessionState {
     pub effort: Effort,
     pub messages: Vec<Message>,
     pub read_snapshots: Vec<ReadSnapshot>,
+    pub run_count: u64,
+    pub usage: TokenUsage,
+    pub estimated_cost_usd: f64,
+    /// Last Provider-reported prompt tokens (for context fill).
+    pub last_prompt_tokens: Option<u64>,
 }
 
 /// Record of a file read for optimistic edits.
@@ -70,6 +79,83 @@ impl Session {
 
     pub async fn snapshot(&self) -> SessionState {
         self.state.lock().await.clone()
+    }
+
+    /// Idle / running / queued depth for `status`.
+    pub async fn run_state(&self) -> RunState {
+        let control = self.run_control.lock().await;
+        if control.busy {
+            RunState::Running {
+                waiting: control.queue.len(),
+            }
+        } else if !control.queue.is_empty() {
+            RunState::Queued {
+                depth: control.queue.len(),
+            }
+        } else {
+            RunState::Idle
+        }
+    }
+
+    /// Full `saku status` text: Session snapshot + live Codex account (best-effort).
+    pub async fn status_text(&self) -> String {
+        let client = reqwest::Client::new();
+        let (account, account_error) =
+            match crate::provider::fetch_codex_account_status(&self.inner.credentials, &client)
+                .await
+            {
+                Ok(account) => (Some(account), None),
+                Err(err) => (None, Some(err.to_string())),
+            };
+        let report = self
+            .status_report(
+                &self.inner.default_model,
+                self.inner.default_effort,
+                crate::provider::CODEX_PROVIDER_ID,
+                account,
+                account_error,
+            )
+            .await;
+        crate::status::format_status(&report)
+    }
+
+    /// Build a StatusReport for this Session (account fields filled by caller).
+    pub async fn status_report(
+        &self,
+        default_model: &str,
+        default_effort: Effort,
+        provider: &str,
+        account: Option<CodexAccountStatus>,
+        account_error: Option<String>,
+    ) -> StatusReport {
+        let state = self.snapshot().await;
+        let run_state = self.run_state().await;
+        let window = context_window_for(&state.model);
+        let mut memory = read_memory(&self.inner.data_dir).unwrap_or_default();
+        if memory.chars().count() > MEMORY_CHAR_LIMIT {
+            memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
+        }
+        let system = build_system_prompt(&self.inner.workspace, &state.cwd, &memory);
+        let estimated = estimate_tokens(&state.messages, &system) as u64;
+        let (context_tokens, context_fill_percent) =
+            context_fill_for(state.last_prompt_tokens, estimated, window);
+        StatusReport {
+            model: state.model,
+            effort: state.effort,
+            cwd: state.cwd,
+            run_state,
+            run_count: state.run_count,
+            usage: state.usage,
+            estimated_cost_usd: state.estimated_cost_usd,
+            context_fill_percent,
+            context_tokens,
+            context_window: window,
+            default_model: default_model.into(),
+            default_effort,
+            provider: provider.into(),
+            account,
+            account_error,
+        }
     }
 
     /// Abort the active Run and drain the Session Run Queue.
@@ -196,6 +282,14 @@ impl Session {
         tx: mpsc::UnboundedSender<RunEvent>,
     ) -> Result<(), RunError> {
         let _ = tx.send(RunEvent::RunStarted);
+        {
+            let mut state = self.state.lock().await;
+            state.run_count = state.run_count.saturating_add(1);
+            self.inner
+                .store
+                .append_run_started(&self.thread_id)
+                .map_err(|e| RunError::Store(e.to_string()))?;
+        }
 
         {
             let mut state = self.state.lock().await;
@@ -268,6 +362,7 @@ impl Session {
                 memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
             }
             let system = build_system_prompt(&workspace, &cwd, &memory);
+            let model_for_usage = model.clone();
             let request = Request {
                 system,
                 messages,
@@ -279,6 +374,7 @@ impl Session {
             let mut stream = self.inner.provider.complete(request);
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
+            let mut turn_usage: Option<TokenUsage> = None;
 
             while let Some(item) = stream.next().await {
                 if self.is_aborted().await {
@@ -304,6 +400,9 @@ impl Session {
                             arguments,
                         });
                     }
+                    Ok(ProviderEvent::Usage(usage)) => {
+                        turn_usage = Some(usage);
+                    }
                     Ok(ProviderEvent::MessageComplete) => break,
                     Ok(ProviderEvent::Error(message)) => {
                         let _ = tx.send(RunEvent::RunError { message });
@@ -316,6 +415,10 @@ impl Session {
                         return Ok(());
                     }
                 }
+            }
+
+            if let Some(usage) = turn_usage {
+                self.record_usage(&model_for_usage, usage).await?;
             }
 
             if !assistant_text.is_empty() || !tool_calls.is_empty() {
@@ -419,6 +522,34 @@ impl Session {
         }
         Ok(())
     }
+
+    async fn record_usage(&self, model: &str, usage: TokenUsage) -> Result<(), RunError> {
+        let cost = rates_for(model)
+            .map(|rates| estimate_cost_usd(&usage, &rates))
+            .unwrap_or(0.0);
+        self.inner
+            .store
+            .append_usage(&self.thread_id, &usage, cost)
+            .map_err(|e| RunError::Store(e.to_string()))?;
+        let mut state = self.state.lock().await;
+        state.usage.add_assign(&usage);
+        state.estimated_cost_usd += cost;
+        state.last_prompt_tokens = Some(usage.prompt_tokens());
+        Ok(())
+    }
+}
+
+fn context_fill_for(
+    last_prompt_tokens: Option<u64>,
+    estimated_tokens: u64,
+    window: Option<u64>,
+) -> (Option<u64>, Option<f64>) {
+    let Some(window) = window.filter(|w| *w > 0) else {
+        return (None, None);
+    };
+    let tokens = last_prompt_tokens.unwrap_or(estimated_tokens);
+    let percent = (tokens as f64 / window as f64) * 100.0;
+    (Some(tokens), Some(percent))
 }
 
 #[derive(Debug, thiserror::Error)]

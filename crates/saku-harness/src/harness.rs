@@ -101,6 +101,22 @@ impl Harness {
         &self.inner.credentials
     }
 
+    pub fn default_model(&self) -> &str {
+        &self.inner.default_model
+    }
+
+    pub fn default_effort(&self) -> Effort {
+        self.inner.default_effort
+    }
+
+    /// Live Codex Plan Usage + Reset Credits (best-effort; errors are for the caller).
+    pub async fn fetch_codex_account_status(
+        &self,
+    ) -> Result<crate::status::CodexAccountStatus, crate::provider::ProviderError> {
+        let client = reqwest::Client::new();
+        crate::provider::fetch_codex_account_status(&self.inner.credentials, &client).await
+    }
+
     pub async fn register_tool(&self, tool: Arc<dyn Tool>) {
         self.inner.tools.lock().await.register(tool);
     }

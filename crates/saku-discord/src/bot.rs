@@ -196,6 +196,7 @@ impl Handler {
                 session.set_effort(effort).await?;
                 format!("Effort set to `{effort}`")
             }
+            BotCommand::Status => session.status_text().await,
         };
 
         reply_chunks(ctx, msg.channel_id, msg, &reply).await?;
@@ -382,7 +383,11 @@ fn can_reference_trigger(output_channel: ChannelId, trigger_channel: ChannelId) 
     output_channel == trigger_channel
 }
 
-fn build_reply(content: impl Into<String>, output_channel: ChannelId, trigger: &Message) -> CreateMessage {
+fn build_reply(
+    content: impl Into<String>,
+    output_channel: ChannelId,
+    trigger: &Message,
+) -> CreateMessage {
     let mut message = CreateMessage::new().content(content);
     if can_reference_trigger(output_channel, trigger.channel_id) {
         message = message.reference_message(reply_reference(trigger));
@@ -403,39 +408,6 @@ async fn reply_chunks(
             .map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn channel_mention_output_goes_to_session_thread_not_parent() {
-        let parent = ChannelId::new(111);
-        let thread = ChannelId::new(222);
-        assert_ne!(parent, thread);
-        assert_eq!(run_output_channel(parent, thread), thread);
-    }
-
-    #[test]
-    fn in_thread_output_stays_on_same_channel() {
-        let thread = ChannelId::new(333);
-        assert_eq!(run_output_channel(thread, thread), thread);
-    }
-
-    #[test]
-    fn new_thread_reply_does_not_reference_parent_channel_message() {
-        let parent = ChannelId::new(111);
-        let thread = ChannelId::new(222);
-        // Repro: first @mention Run posts to the new thread but referenced the
-        // parent-channel starter message → Discord rejected the send, so the
-        // answer never appeared (follow-ups in-thread worked).
-        assert!(
-            !can_reference_trigger(thread, parent),
-            "must not cross-reference parent message when posting into new thread"
-        );
-        assert!(can_reference_trigger(thread, thread));
-    }
 }
 
 async fn react_ok(ctx: &Context, msg: &Message) {
@@ -492,5 +464,38 @@ pub async fn register_default_tools(harness: &Harness) {
     }
     for tool in search_tools(Arc::clone(harness.index())) {
         harness.register_tool(tool).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_mention_output_goes_to_session_thread_not_parent() {
+        let parent = ChannelId::new(111);
+        let thread = ChannelId::new(222);
+        assert_ne!(parent, thread);
+        assert_eq!(run_output_channel(parent, thread), thread);
+    }
+
+    #[test]
+    fn in_thread_output_stays_on_same_channel() {
+        let thread = ChannelId::new(333);
+        assert_eq!(run_output_channel(thread, thread), thread);
+    }
+
+    #[test]
+    fn new_thread_reply_does_not_reference_parent_channel_message() {
+        let parent = ChannelId::new(111);
+        let thread = ChannelId::new(222);
+        // Repro: first @mention Run posts to the new thread but referenced the
+        // parent-channel starter message → Discord rejected the send, so the
+        // answer never appeared (follow-ups in-thread worked).
+        assert!(
+            !can_reference_trigger(thread, parent),
+            "must not cross-reference parent message when posting into new thread"
+        );
+        assert!(can_reference_trigger(thread, thread));
     }
 }

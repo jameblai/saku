@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::config::Effort;
 use crate::session::{ReadSnapshot, SessionState};
-use crate::types::Message;
+use crate::types::{Message, TokenUsage};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -60,6 +60,16 @@ pub enum SessionEntry {
     },
     Compaction {
         summary: String,
+    },
+    /// A Run started (including ones later aborted).
+    RunStarted,
+    /// Token usage (+ estimated USD) accumulated for one Provider turn.
+    Usage {
+        input: u64,
+        output: u64,
+        cache_read: u64,
+        cache_write: u64,
+        cost_usd: f64,
     },
 }
 
@@ -117,6 +127,10 @@ impl SessionStore {
                 effort: default_effort,
                 messages: Vec::new(),
                 read_snapshots: Vec::new(),
+                run_count: 0,
+                usage: TokenUsage::default(),
+                estimated_cost_usd: 0.0,
+                last_prompt_tokens: None,
             });
         }
         self.replay(thread_id)
@@ -144,6 +158,10 @@ impl SessionStore {
             effort: parse_effort(&header.effort).unwrap_or(Effort::Medium),
             messages: Vec::new(),
             read_snapshots: Vec::new(),
+            run_count: 0,
+            usage: TokenUsage::default(),
+            estimated_cost_usd: 0.0,
+            last_prompt_tokens: None,
         };
 
         for line in lines {
@@ -195,6 +213,26 @@ impl SessionStore {
                         tool_call_id: None,
                         tool_calls: Vec::new(),
                     }];
+                }
+                SessionEntry::RunStarted => {
+                    state.run_count = state.run_count.saturating_add(1);
+                }
+                SessionEntry::Usage {
+                    input,
+                    output,
+                    cache_read,
+                    cache_write,
+                    cost_usd,
+                } => {
+                    let delta = TokenUsage {
+                        input,
+                        output,
+                        cache_read,
+                        cache_write,
+                    };
+                    state.usage.add_assign(&delta);
+                    state.estimated_cost_usd += cost_usd;
+                    state.last_prompt_tokens = Some(delta.prompt_tokens());
                 }
             }
         }
@@ -260,6 +298,28 @@ impl SessionStore {
             thread_id,
             &SessionEntry::Compaction {
                 summary: summary.into(),
+            },
+        )
+    }
+
+    pub fn append_run_started(&self, thread_id: &str) -> Result<(), StoreError> {
+        self.append(thread_id, &SessionEntry::RunStarted)
+    }
+
+    pub fn append_usage(
+        &self,
+        thread_id: &str,
+        usage: &TokenUsage,
+        cost_usd: f64,
+    ) -> Result<(), StoreError> {
+        self.append(
+            thread_id,
+            &SessionEntry::Usage {
+                input: usage.input,
+                output: usage.output,
+                cache_read: usage.cache_read,
+                cache_write: usage.cache_write,
+                cost_usd,
             },
         )
     }

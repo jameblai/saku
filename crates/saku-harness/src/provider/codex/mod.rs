@@ -2,6 +2,7 @@
 
 mod login;
 pub mod models;
+pub mod plan_usage;
 
 use std::sync::Arc;
 
@@ -15,6 +16,7 @@ use crate::types::{ContentPart, ProviderEvent, Request, Role, ToolDefinition};
 pub use login::{DeviceCodeInfo, LoginError, LoginNotify, login_device_code};
 use login::{chatgpt_account_id, ensure_fresh_access};
 use models::{PROVIDER_ID, is_allowed_model};
+pub use plan_usage::{fetch_codex_account_status, parse_response_usage, parse_usage_payload};
 
 const CODEX_BASE: &str = "https://chatgpt.com/backend-api";
 
@@ -233,6 +235,9 @@ fn parse_sse_event(
             }
         }
         "response.completed" | "response.incomplete" | "response.done" => {
+            if let Some(usage) = parse_response_usage(value) {
+                events.push(Ok(ProviderEvent::Usage(usage)));
+            }
             events.push(Ok(ProviderEvent::MessageComplete));
         }
         "error" | "response.failed" => {
@@ -404,8 +409,7 @@ mod tests {
 
         assert_eq!(input[1]["role"], "assistant");
         assert_eq!(
-            input[1]["content"][0]["type"],
-            "output_text",
+            input[1]["content"][0]["type"], "output_text",
             "assistant history must use output_text (got {:?})",
             input[1]["content"][0]["type"]
         );
@@ -421,5 +425,31 @@ mod tests {
         let input = body["input"].as_array().expect("input array");
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["content"][0]["type"], "input_text");
+    }
+
+    #[test]
+    fn completed_sse_emits_usage_before_message_complete() {
+        let value = json!({
+            "type": "response.completed",
+            "response": {
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 10,
+                    "input_tokens_details": { "cached_tokens": 20, "cache_write_tokens": 0 }
+                }
+            }
+        });
+        let mut events = Vec::new();
+        let mut tool_args = std::collections::HashMap::new();
+        let mut tool_names = std::collections::HashMap::new();
+        parse_sse_event(&value, &mut events, &mut tool_args, &mut tool_names);
+        assert!(matches!(
+            events.first(),
+            Some(Ok(ProviderEvent::Usage(u))) if u.input == 80 && u.cache_read == 20 && u.output == 10
+        ));
+        assert!(matches!(
+            events.get(1),
+            Some(Ok(ProviderEvent::MessageComplete))
+        ));
     }
 }

@@ -12,11 +12,11 @@ use crate::types::{ProviderEvent, Request};
 
 pub use codex::models::{
     ALLOWED_MODELS, PROVIDER_ID as CODEX_PROVIDER_ID, default_effort_for_model, is_allowed_model,
-    is_supported_effort, supported_efforts,
+    is_supported_effort, model_info, rates_for, supported_efforts,
 };
 pub use codex::{
     CodexProvider, DeviceCodeInfo, LoginError, LoginNotify, create_codex_provider,
-    login_device_code,
+    fetch_codex_account_status, login_device_code, parse_response_usage, parse_usage_payload,
 };
 pub use fake::{FakeProvider, ScriptedResponse};
 

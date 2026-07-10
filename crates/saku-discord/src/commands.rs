@@ -12,6 +12,7 @@ pub enum BotCommand {
     Effort {
         level: Option<String>,
     },
+    Status,
 }
 
 pub fn parse_command(prefix: &str, content: &str) -> Option<BotCommand> {
@@ -25,6 +26,7 @@ pub fn parse_command(prefix: &str, content: &str) -> Option<BotCommand> {
     match cmd.as_str() {
         "help" => Some(BotCommand::Help),
         "stop" => Some(BotCommand::Stop),
+        "status" => Some(BotCommand::Status),
         "steer" => {
             let msg = rest.strip_prefix("steer").unwrap_or("").trim();
             if msg.is_empty() {
@@ -53,7 +55,8 @@ pub fn help_text(prefix: &str) -> String {
          - `{prefix} stop` — abort active Run and drain queue\n\
          - `{prefix} steer <message>` — redirect after current tool batch\n\
          - `{prefix} model` / `{prefix} model <id> [effort]`\n\
-         - `{prefix} effort` / `{prefix} effort <level>`"
+         - `{prefix} effort` / `{prefix} effort <level>`\n\
+         - `{prefix} status` — Session, config, and Codex Plan Usage"
     )
 }
 
@@ -71,5 +74,19 @@ mod tests {
                 effort: Some("high".into()),
             })
         );
+    }
+
+    #[test]
+    fn parses_status() {
+        assert_eq!(
+            parse_command("saku", "saku status"),
+            Some(BotCommand::Status)
+        );
+    }
+
+    #[test]
+    fn help_lists_status() {
+        let text = help_text("saku");
+        assert!(text.contains("`saku status`"));
     }
 }

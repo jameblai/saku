@@ -14,6 +14,11 @@ use crate::types::{ProviderEvent, Request, ToolCall};
 pub enum ScriptedResponse {
     /// Stream text deltas then complete (no tool calls).
     Text(String),
+    /// Text plus usage before MessageComplete.
+    TextWithUsage {
+        text: String,
+        usage: crate::types::TokenUsage,
+    },
     /// Emit tool calls (arguments as JSON values) then complete.
     ToolCalls(Vec<ToolCall>),
     /// Fail the completion.
@@ -40,6 +45,13 @@ impl FakeProvider {
         self.push(ScriptedResponse::Text(text.into()));
     }
 
+    pub fn push_text_with_usage(&self, text: impl Into<String>, usage: crate::types::TokenUsage) {
+        self.push(ScriptedResponse::TextWithUsage {
+            text: text.into(),
+            usage,
+        });
+    }
+
     pub fn push_error(&self, message: impl Into<String>) {
         self.push(ScriptedResponse::Error(message.into()));
     }
@@ -64,10 +76,18 @@ impl Provider for FakeProvider {
         let events: Vec<Result<ProviderEvent, ProviderError>> = match next {
             Some(ScriptedResponse::Text(text)) => {
                 let mut out = Vec::new();
-                // Chunk into small deltas so adapters exercise streaming.
                 for chunk in split_deltas(&text) {
                     out.push(Ok(ProviderEvent::TextDelta(chunk)));
                 }
+                out.push(Ok(ProviderEvent::MessageComplete));
+                out
+            }
+            Some(ScriptedResponse::TextWithUsage { text, usage }) => {
+                let mut out = Vec::new();
+                for chunk in split_deltas(&text) {
+                    out.push(Ok(ProviderEvent::TextDelta(chunk)));
+                }
+                out.push(Ok(ProviderEvent::Usage(usage)));
                 out.push(Ok(ProviderEvent::MessageComplete));
                 out
             }

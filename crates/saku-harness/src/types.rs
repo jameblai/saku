@@ -122,6 +122,29 @@ pub enum RunEvent {
     RunAborted,
 }
 
+/// Token counts from a Provider turn (cache split out of billed input).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+}
+
+impl TokenUsage {
+    pub fn add_assign(&mut self, other: &TokenUsage) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_read += other.cache_read;
+        self.cache_write += other.cache_write;
+    }
+
+    /// Prompt-side tokens useful for context fill (input + cache read + cache write).
+    pub fn prompt_tokens(self) -> u64 {
+        self.input + self.cache_read + self.cache_write
+    }
+}
+
 /// Events from a Provider completion stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderEvent {
@@ -132,6 +155,8 @@ pub enum ProviderEvent {
         name: String,
         arguments: Value,
     },
+    /// Token usage for the completed Provider turn (may arrive before MessageComplete).
+    Usage(TokenUsage),
     MessageComplete,
     Error(String),
 }

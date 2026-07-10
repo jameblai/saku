@@ -89,8 +89,16 @@ _Avoid_: slash command (unless Discord slash commands are added later)
 
 
 **Bot Command**:
-A user message in a Session thread that starts with the Command Prefix and is handled by Saku rather than sent to the Harness as a normal prompt. v1: `stop`, `help`, `steer <message>`, `model`, `effort`.
+A user message in a Session thread that starts with the Command Prefix and is handled by Saku rather than sent to the Harness as a normal prompt. v1: `stop`, `help`, `steer <message>`, `model`, `effort`, `status`.
 _Avoid_: slash command, reaction cancel (not used for cancel in v1)
+
+**Plan Usage**:
+The Codex subscription’s rolling rate-limit windows — **5h** and **weekly** remaining allowance, each with a reset time — fetched live for `status`. Not a calendar-day quota.
+_Avoid_: daily usage, quota (alone), rate limit % (alone)
+
+**Reset Credit**:
+One banked Codex rate-limit reset the user can spend later. `status` is read-only: it shows available count and soonest expiry; redeeming is not a Bot Command (yet).
+_Avoid_: reset bank token, usage voucher
 
 **Steer**:
 A Bot Command that injects a mid-Run user directive into the active Session; applied after the current tool batch finishes (does not start a second parallel Run in that Session).

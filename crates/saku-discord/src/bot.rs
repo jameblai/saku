@@ -18,6 +18,7 @@ use tracing::{error, info, warn};
 use crate::chunk::chunk_message;
 use crate::commands::{BotCommand, help_text, parse_command};
 use crate::progress::{args_preview, format_progress};
+use crate::typing::{TYPING_REFRESH, TypingIndicator};
 
 const HOURGLASS: &str = "⏳";
 const CHECKMARK: &str = "✅";
@@ -226,6 +227,7 @@ impl Handler {
         let mut aborted = false;
         let mut fail_note = String::new();
         let mut hourglass = false;
+        let mut typing: Option<TypingIndicator> = None;
 
         while let Some(ev) = handle.next_event().await {
             match ev {
@@ -247,6 +249,20 @@ impl Handler {
                             .await;
                         hourglass = false;
                     }
+                }
+                RunEvent::RunStarted => {
+                    let http = ctx.http.clone();
+                    let channel = output_channel;
+                    typing = Some(TypingIndicator::start(TYPING_REFRESH, move || {
+                        let http = http.clone();
+                        async move {
+                            channel
+                                .broadcast_typing(&*http)
+                                .await
+                                .map(|_| ())
+                                .map_err(|_| ())
+                        }
+                    }));
                 }
                 RunEvent::TextDelta { text } => answer.push_str(&text),
                 RunEvent::ToolStarted { name, args } => {
@@ -277,6 +293,10 @@ impl Handler {
                 RunEvent::RunFinished => break,
                 _ => {}
             }
+        }
+
+        if let Some(t) = typing.take() {
+            t.stop();
         }
 
         if hourglass {

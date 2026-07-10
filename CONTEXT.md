@@ -112,6 +112,10 @@ _Avoid_: status embed, log dump
 A separate Discord reply to the same user message containing the Run’s final assistant text (chunked if needed), posted after tools finish.
 _Avoid_: Progress Message (different message)
 
+**Typing Indicator**:
+Discord’s ephemeral “is typing…” signal in the Session thread for the duration of an active Run (from Run start / `Dequeued` until the Run terminates). Not shown while queued; not used for Bot Commands.
+_Avoid_: presence, status, activity
+
 **Compaction**:
 A pi-style reduction of a Session transcript: older turns are summarized into a compact entry so the Harness stays within the model context window while recent messages and Memory remain available.
 _Avoid_: truncate, summarize (alone), prune

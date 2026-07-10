@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -182,17 +182,22 @@ fn chmod_0600(path: &Path) -> Result<(), CredentialError> {
 }
 
 fn acquire_exclusive_lock(file: &File) -> Result<(), CredentialError> {
-    // Retry briefly so concurrent modify tests / processes can serialize.
-    for attempt in 0..50 {
+    // Poll until the lock is free. Short sleeps keep contention tests and
+    // concurrent processes from timing out on slow CI runners.
+    const MAX_WAIT: Duration = Duration::from_secs(5);
+    let deadline = Instant::now() + MAX_WAIT;
+    loop {
         match file.try_lock() {
             Ok(()) => return Ok(()),
             Err(TryLockError::WouldBlock) => {
-                thread::sleep(Duration::from_millis(10 + attempt));
+                if Instant::now() >= deadline {
+                    return Err(CredentialError::LockTimeout);
+                }
+                thread::sleep(Duration::from_millis(2));
             }
             Err(TryLockError::Error(err)) => return Err(err.into()),
         }
     }
-    Err(CredentialError::LockTimeout)
 }
 
 #[cfg(test)]
@@ -286,8 +291,6 @@ mod tests {
                             Some(Credential::ApiKey { key }) => key.parse().unwrap_or(0),
                             _ => 0,
                         };
-                        // Hold the critical section briefly so contention is real.
-                        thread::sleep(Duration::from_millis(5));
                         Ok(Some(Credential::ApiKey {
                             key: (n + 1).to_string(),
                         }))

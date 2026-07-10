@@ -1,0 +1,16 @@
+[package]
+name = "saku"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Saku Discord coding agent binary"
+
+[[bin]]
+name = "saku"
+path = "src/main.rs"
+
+[dependencies]
+saku-harness = { workspace = true }
+saku-discord = { workspace = true }
+saku-cli = { workspace = true }

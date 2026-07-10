@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/saku-harness",
+    "crates/saku-discord",
+    "crates/saku-cli",
+    "crates/saku",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/jameblai/saku"
+
+[workspace.dependencies]
+saku-harness = { path = "crates/saku-harness" }
+saku-discord = { path = "crates/saku-discord" }
+saku-cli = { path = "crates/saku-cli" }

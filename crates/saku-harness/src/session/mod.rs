@@ -19,7 +19,9 @@ use crate::harness::HarnessInner;
 use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
 use crate::prompt::build_system_prompt;
 use crate::provider::codex::models::{context_window_for, rates_for};
-use crate::status::{CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd};
+use crate::status::{
+    CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd,
+};
 use crate::types::{
     Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, UserTurn,
 };

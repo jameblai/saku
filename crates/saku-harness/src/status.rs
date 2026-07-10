@@ -120,11 +120,7 @@ pub fn format_status(report: &StatusReport) -> String {
 
     out.push_str("\n**Tools**\n");
     if !report.tool_names.is_empty() {
-        let names: Vec<String> = report
-            .tool_names
-            .iter()
-            .map(|n| format!("`{n}`"))
-            .collect();
+        let names: Vec<String> = report.tool_names.iter().map(|n| format!("`{n}`")).collect();
         out.push_str(&names.join(" "));
         out.push('\n');
     }

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{ok_text, record_snapshot, resolve_tool_path};
+use super::{ok_text, resolve_tool_path};
 use crate::tools::{Tool, ToolContext, ToolError, ToolResult};
 
 pub struct ReadTool;
@@ -29,9 +29,12 @@ impl Tool for ReadTool {
 
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let path_arg = super::arg_string(&args, "path")?;
-        let path = resolve_tool_path(ctx.session, &path_arg).await?;
+        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, ctx.data_dir, &path_arg)?;
         let bytes = std::fs::read(&path).map_err(|e| ToolError::Message(e.to_string()))?;
-        record_snapshot(ctx.session, &path).await?;
+        ctx.session
+            .record_read_snapshot(&path)
+            .await
+            .map_err(ToolError::Message)?;
 
         if crate::vision::is_image_path(&path) {
             let (resized, mime) = crate::vision::resize_for_provider(&bytes, None)

@@ -6,6 +6,7 @@ pub mod search;
 pub mod shell;
 pub mod web;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -56,9 +57,17 @@ impl ToolResult {
 }
 
 /// Shared context for tool execution.
+///
+/// Path fields (`workspace`, `cwd`, `data_dir`) are supplied by the Harness so Tools
+/// do not read `Session` internals. `cwd` is a snapshot taken at tool start.
+/// `session` is for Session methods only (e.g. Read Snapshots, `cd`, background).
 pub struct ToolContext<'a> {
     pub session: &'a Session,
+    pub workspace: &'a Path,
+    pub cwd: PathBuf,
+    pub data_dir: &'a Path,
     pub abort: watch::Receiver<bool>,
+    /// Optional progress callback shape; Harness currently passes `None`.
     pub progress: Option<Box<dyn Fn(String) + Send + Sync + 'a>>,
 }
 

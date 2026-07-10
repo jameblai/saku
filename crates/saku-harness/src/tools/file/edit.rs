@@ -1,10 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{
-    arg_string, maybe_enforce_memory_cap, ok_text, record_snapshot, require_fresh_snapshot,
-    resolve_tool_path,
-};
+use super::{arg_string, maybe_enforce_memory_cap, ok_text, resolve_tool_path};
 use crate::tools::{Tool, ToolContext, ToolError, ToolResult};
 
 pub struct EditTool;
@@ -36,14 +33,17 @@ impl Tool for EditTool {
         let path_arg = arg_string(&args, "path")?;
         let old = arg_string(&args, "old_string")?;
         let new = arg_string(&args, "new_string")?;
-        let path = resolve_tool_path(ctx.session, &path_arg).await?;
+        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, ctx.data_dir, &path_arg)?;
         if !path.exists() {
             return Ok(ToolResult::error(format!(
                 "file does not exist: {}",
                 path.display()
             )));
         }
-        require_fresh_snapshot(ctx.session, &path).await?;
+        ctx.session
+            .assert_fresh_snapshot(&path)
+            .await
+            .map_err(ToolError::Message)?;
         let content =
             std::fs::read_to_string(&path).map_err(|e| ToolError::Message(e.to_string()))?;
         let matches: Vec<_> = content.match_indices(&old).collect();
@@ -56,9 +56,12 @@ impl Tool for EditTool {
             ));
         }
         let updated = content.replacen(&old, &new, 1);
-        maybe_enforce_memory_cap(&path, &ctx.session.inner.data_dir, &updated)?;
+        maybe_enforce_memory_cap(&path, ctx.data_dir, &updated)?;
         std::fs::write(&path, &updated).map_err(|e| ToolError::Message(e.to_string()))?;
-        record_snapshot(ctx.session, &path).await?;
+        ctx.session
+            .record_read_snapshot(&path)
+            .await
+            .map_err(ToolError::Message)?;
         Ok(ok_text("ok"))
     }
 }

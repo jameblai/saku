@@ -39,15 +39,9 @@ impl Tool for CdTool {
 
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let path_arg = arg_string(&args, "path")?;
-        let state = ctx.session.snapshot().await;
-        let memory = crate::memory::memory_path(&ctx.session.inner.data_dir);
-        let resolved = resolve_in_workspace(
-            &ctx.session.inner.workspace,
-            &state.cwd,
-            &path_arg,
-            Some(&memory),
-        )
-        .map_err(|e| ToolError::Message(e.to_string()))?;
+        let memory = crate::memory::memory_path(ctx.data_dir);
+        let resolved = resolve_in_workspace(ctx.workspace, &ctx.cwd, &path_arg, Some(&memory))
+            .map_err(|e| ToolError::Message(e.to_string()))?;
 
         if !resolved.is_dir() {
             return Ok(ToolResult::error(format!(
@@ -56,15 +50,10 @@ impl Tool for CdTool {
             )));
         }
 
-        {
-            let mut state = ctx.session.state.lock().await;
-            state.cwd = resolved.clone();
-        }
         ctx.session
-            .inner
-            .store
-            .append_cwd(&ctx.session.thread_id, &resolved)
-            .map_err(|e| ToolError::Message(e.to_string()))?;
+            .set_cwd(resolved.clone())
+            .await
+            .map_err(ToolError::Message)?;
 
         Ok(ToolResult::text(format!("cwd: {}", resolved.display())))
     }
@@ -99,12 +88,12 @@ impl Tool for BashTool {
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let command = arg_string(&args, "command")?;
         let timeout_secs = args.get("timeout").and_then(|v| v.as_f64());
-        let cwd = ctx.session.snapshot().await.cwd;
+        let cwd = &ctx.cwd;
 
         let child = Command::new("bash")
             .arg("-lc")
             .arg(&command)
-            .current_dir(&cwd)
+            .current_dir(cwd)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)

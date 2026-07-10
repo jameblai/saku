@@ -55,8 +55,8 @@ impl Tool for BgStartTool {
             .get("settle")
             .and_then(|v| v.as_f64())
             .unwrap_or(DEFAULT_SETTLE_SECS);
-        let cwd = ctx.session.snapshot().await.cwd;
-        match ctx.session.background.start(command, &cwd, settle).await {
+        let cwd = &ctx.cwd;
+        match ctx.session.background.start(command, cwd, settle).await {
             Ok(text) => Ok(ToolResult::text(text)),
             Err(msg) => Ok(ToolResult::error(msg)),
         }

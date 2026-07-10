@@ -16,6 +16,8 @@ use crate::types::{Message, ProviderEvent, Request, Role, RunEvent, ToolCall, Us
 
 pub use store::{SessionEntry, SessionHeader, SessionStore, StoreError};
 
+const MAX_TOOL_ROUNDS: usize = 40;
+
 /// In-memory Session state rebuilt from the Session Store.
 #[derive(Debug, Clone)]
 pub struct SessionState {
@@ -73,7 +75,7 @@ impl Session {
     ) -> Result<(), RunError> {
         let _ = tx.send(RunEvent::RunStarted);
 
-        let (model, effort, messages, cwd, workspace, data_dir, tools) = {
+        {
             let mut state = self.state.lock().await;
             let user_msg = Message::from_user_turn(&turn);
             state.messages.push(user_msg.clone());
@@ -81,104 +83,104 @@ impl Session {
                 .store
                 .append_message(&self.thread_id, &user_msg)
                 .map_err(|e| RunError::Store(e.to_string()))?;
+        }
 
-            let tools = self.inner.tools.lock().await.definitions();
-            (
-                state.model.clone(),
-                state.effort,
-                state.messages.clone(),
-                state.cwd.clone(),
-                self.inner.workspace.clone(),
-                self.inner.data_dir.clone(),
+        for _round in 0..MAX_TOOL_ROUNDS {
+            let (model, effort, messages, cwd, workspace, data_dir, tools) = {
+                let state = self.state.lock().await;
+                let tools = self.inner.tools.lock().await.definitions();
+                (
+                    state.model.clone(),
+                    state.effort,
+                    state.messages.clone(),
+                    state.cwd.clone(),
+                    self.inner.workspace.clone(),
+                    self.inner.data_dir.clone(),
+                    tools,
+                )
+            };
+
+            let memory = read_memory(&data_dir).unwrap_or_default();
+            let system = build_system_prompt(&workspace, &cwd, &memory);
+            let request = Request {
+                system,
+                messages,
                 tools,
-            )
-        };
+                model,
+                effort,
+            };
 
-        let memory = read_memory(&data_dir).unwrap_or_default();
-        let system = build_system_prompt(&workspace, &cwd, &memory);
+            let mut stream = self.inner.provider.complete(request);
+            let mut assistant_text = String::new();
+            let mut tool_calls: Vec<ToolCall> = Vec::new();
 
-        let request = Request {
-            system,
-            messages,
-            tools,
-            model,
-            effort,
-        };
-
-        let mut stream = self.inner.provider.complete(request);
-        let mut assistant_text = String::new();
-        let mut tool_calls: Vec<ToolCall> = Vec::new();
-
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(ProviderEvent::TextDelta(text)) => {
-                    assistant_text.push_str(&text);
-                    let _ = tx.send(RunEvent::TextDelta { text });
-                }
-                Ok(ProviderEvent::ReasoningDelta(text)) => {
-                    let _ = tx.send(RunEvent::ReasoningDelta { text });
-                }
-                Ok(ProviderEvent::ToolCall {
-                    id,
-                    name,
-                    arguments,
-                }) => {
-                    tool_calls.push(ToolCall {
+            while let Some(item) = stream.next().await {
+                match item {
+                    Ok(ProviderEvent::TextDelta(text)) => {
+                        assistant_text.push_str(&text);
+                        let _ = tx.send(RunEvent::TextDelta { text });
+                    }
+                    Ok(ProviderEvent::ReasoningDelta(text)) => {
+                        let _ = tx.send(RunEvent::ReasoningDelta { text });
+                    }
+                    Ok(ProviderEvent::ToolCall {
                         id,
                         name,
                         arguments,
-                    });
-                }
-                Ok(ProviderEvent::MessageComplete) => break,
-                Ok(ProviderEvent::Error(message)) => {
-                    let _ = tx.send(RunEvent::RunError { message });
-                    return Ok(());
-                }
-                Err(err) => {
-                    let _ = tx.send(RunEvent::RunError {
-                        message: err.to_string(),
-                    });
-                    return Ok(());
+                    }) => {
+                        tool_calls.push(ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        });
+                    }
+                    Ok(ProviderEvent::MessageComplete) => break,
+                    Ok(ProviderEvent::Error(message)) => {
+                        let _ = tx.send(RunEvent::RunError { message });
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        let _ = tx.send(RunEvent::RunError {
+                            message: err.to_string(),
+                        });
+                        return Ok(());
+                    }
                 }
             }
-        }
 
-        // Persist assistant message (text and/or tool calls). Tools execute in later tickets.
-        if !assistant_text.is_empty() || !tool_calls.is_empty() {
-            let assistant = Message {
-                role: Role::Assistant,
-                content: if assistant_text.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![crate::types::ContentPart::text(&assistant_text)]
-                },
-                tool_call_id: None,
-                tool_calls: tool_calls.clone(),
-            };
-            {
-                let mut state = self.state.lock().await;
-                state.messages.push(assistant.clone());
+            if !assistant_text.is_empty() || !tool_calls.is_empty() {
+                let assistant = Message {
+                    role: Role::Assistant,
+                    content: if assistant_text.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![crate::types::ContentPart::text(&assistant_text)]
+                    },
+                    tool_call_id: None,
+                    tool_calls: tool_calls.clone(),
+                };
+                {
+                    let mut state = self.state.lock().await;
+                    state.messages.push(assistant.clone());
+                }
+                self.inner
+                    .store
+                    .append_message(&self.thread_id, &assistant)
+                    .map_err(|e| RunError::Store(e.to_string()))?;
             }
-            self.inner
-                .store
-                .append_message(&self.thread_id, &assistant)
-                .map_err(|e| RunError::Store(e.to_string()))?;
-        }
 
-        // If the model requested tools but none are registered yet, surface a clear error
-        // only when tools were expected to run — for #5 text-only, tool calls just persist.
-        if !tool_calls.is_empty() {
-            // Execute tools when registry has them (filled in later tickets).
-            if let Err(err) = self.execute_tools(&tool_calls, &tx).await {
-                let _ = tx.send(RunEvent::RunError {
-                    message: err.to_string(),
-                });
+            if tool_calls.is_empty() {
+                let _ = tx.send(RunEvent::AssistantFinished);
+                let _ = tx.send(RunEvent::RunFinished);
                 return Ok(());
             }
+
+            self.execute_tools(&tool_calls, &tx).await?;
         }
 
-        let _ = tx.send(RunEvent::AssistantFinished);
-        let _ = tx.send(RunEvent::RunFinished);
+        let _ = tx.send(RunEvent::RunError {
+            message: format!("exceeded {MAX_TOOL_ROUNDS} tool rounds"),
+        });
         Ok(())
     }
 

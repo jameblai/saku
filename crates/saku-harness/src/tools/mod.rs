@@ -1,4 +1,6 @@
-//! Tool trait and registry (implementations land in later tickets).
+//! Tool trait and registry.
+
+pub mod file;
 
 use std::sync::Arc;
 
@@ -9,6 +11,8 @@ use tokio::sync::watch;
 
 use crate::session::Session;
 use crate::types::{ContentPart, ToolDefinition};
+
+pub use file::{EditTool, ReadTool, WriteTool, file_tools};
 
 #[derive(Debug, Error)]
 pub enum ToolError {

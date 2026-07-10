@@ -2,6 +2,7 @@
 
 mod store;
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ use crate::compaction::{
 };
 use crate::config::Effort;
 use crate::harness::HarnessInner;
-use crate::memory::read_memory;
+use crate::memory::{read_memory, MEMORY_CHAR_LIMIT};
 use crate::prompt::build_system_prompt;
 use crate::types::{Message, ProviderEvent, Request, Role, RunEvent, ToolCall, UserTurn};
 
@@ -41,6 +42,17 @@ pub struct ReadSnapshot {
     pub mtime_secs: i64,
 }
 
+struct QueuedRun {
+    turn: UserTurn,
+    tx: mpsc::UnboundedSender<RunEvent>,
+}
+
+pub(crate) struct RunControl {
+    busy: bool,
+    queue: VecDeque<QueuedRun>,
+    pending_steer: Option<String>,
+}
+
 /// Handle to a Session bound to a Discord thread id.
 #[derive(Clone)]
 pub struct Session {
@@ -48,6 +60,7 @@ pub struct Session {
     pub(crate) inner: Arc<HarnessInner>,
     pub(crate) state: Arc<Mutex<SessionState>>,
     pub(crate) abort_tx: Arc<Mutex<watch::Sender<bool>>>,
+    pub(crate) run_control: Arc<Mutex<RunControl>>,
 }
 
 impl Session {
@@ -59,9 +72,19 @@ impl Session {
         self.state.lock().await.clone()
     }
 
-    /// Abort the active Run (and running bash) for later `stop` Bot Command wiring.
+    /// Abort the active Run and drain the Session Run Queue.
     pub async fn stop(&self) {
         let _ = self.abort_tx.lock().await.send(true);
+        let mut control = self.run_control.lock().await;
+        while let Some(queued) = control.queue.pop_front() {
+            let _ = queued.tx.send(RunEvent::RunAborted);
+        }
+        control.pending_steer = None;
+    }
+
+    /// Inject a mid-Run steer directive applied after the current tool batch.
+    pub async fn steer(&self, message: impl Into<String>) {
+        self.run_control.lock().await.pending_steer = Some(message.into());
     }
 
     pub async fn set_model(&self, model: impl Into<String>) -> Result<(), String> {
@@ -108,19 +131,65 @@ impl Session {
         let _ = self.abort_tx.lock().await.send(false);
     }
 
-    /// Start (or queue) a Run for this user turn.
+    async fn take_steer(&self) -> Option<String> {
+        self.run_control.lock().await.pending_steer.take()
+    }
+
+    async fn is_aborted(&self) -> bool {
+        *self.abort_tx.lock().await.borrow()
+    }
+
+    /// Start or queue a Run for this user turn.
     pub async fn run(&self, turn: UserTurn) -> RunHandle {
         let (tx, rx) = mpsc::unbounded_channel();
+        let mut control = self.run_control.lock().await;
+        if control.busy {
+            let _ = tx.send(RunEvent::Queued);
+            control.queue.push_back(QueuedRun { turn, tx });
+            return RunHandle { rx };
+        }
+        control.busy = true;
+        drop(control);
+
         let session = self.clone();
         tokio::spawn(async move {
-            session.reset_abort().await;
-            if let Err(err) = session.execute_run(turn, tx.clone()).await {
+            session.run_pipeline(turn, tx).await;
+        });
+        RunHandle { rx }
+    }
+
+    async fn run_pipeline(self, turn: UserTurn, tx: mpsc::UnboundedSender<RunEvent>) {
+        self.reset_abort().await;
+        if let Err(err) = self.execute_run(turn, tx.clone()).await {
+            let _ = tx.send(RunEvent::RunError {
+                message: err.to_string(),
+            });
+        }
+        self.pump_session_queue().await;
+    }
+
+    async fn pump_session_queue(&self) {
+        loop {
+            let next = {
+                let mut control = self.run_control.lock().await;
+                if let Some(queued) = control.queue.pop_front() {
+                    Some(queued)
+                } else {
+                    control.busy = false;
+                    None
+                }
+            };
+            let Some(QueuedRun { turn, tx }) = next else {
+                return;
+            };
+            let _ = tx.send(RunEvent::Dequeued);
+            self.reset_abort().await;
+            if let Err(err) = self.execute_run(turn, tx.clone()).await {
                 let _ = tx.send(RunEvent::RunError {
                     message: err.to_string(),
                 });
             }
-        });
-        RunHandle { rx }
+        }
     }
 
     async fn execute_run(
@@ -141,10 +210,17 @@ impl Session {
         }
 
         for _round in 0..MAX_TOOL_ROUNDS {
+            if self.is_aborted().await {
+                let _ = tx.send(RunEvent::RunAborted);
+                return Ok(());
+            }
+
             let (model, effort, messages, cwd, workspace, data_dir, tools) = {
                 let mut state = self.state.lock().await;
-                // Compaction check before each Provider call.
-                let memory = read_memory(&self.inner.data_dir).unwrap_or_default();
+                let mut memory = read_memory(&self.inner.data_dir).unwrap_or_default();
+                if memory.chars().count() > MEMORY_CHAR_LIMIT {
+                    memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
+                }
                 let system_probe = build_system_prompt(&self.inner.workspace, &state.cwd, &memory);
                 if estimate_tokens(&state.messages, &system_probe) > DEFAULT_COMPACTION_TOKEN_LIMIT {
                     if let Some(result) =
@@ -154,9 +230,7 @@ impl Session {
                             .store
                             .append_compaction(&self.thread_id, &result.summary)
                             .map_err(|e| RunError::Store(e.to_string()))?;
-                        // After compaction entry, re-append kept messages so replay rebuilds the tail.
                         for msg in &result.kept_messages {
-                            // Skip rewriting the synthetic summary as a message entry — it's in compaction.
                             if msg
                                 .content
                                 .first()
@@ -189,7 +263,10 @@ impl Session {
                 )
             };
 
-            let memory = read_memory(&data_dir).unwrap_or_default();
+            let mut memory = read_memory(&data_dir).unwrap_or_default();
+            if memory.chars().count() > MEMORY_CHAR_LIMIT {
+                memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
+            }
             let system = build_system_prompt(&workspace, &cwd, &memory);
             let request = Request {
                 system,
@@ -204,6 +281,10 @@ impl Session {
             let mut tool_calls: Vec<ToolCall> = Vec::new();
 
             while let Some(item) = stream.next().await {
+                if self.is_aborted().await {
+                    let _ = tx.send(RunEvent::RunAborted);
+                    return Ok(());
+                }
                 match item {
                     Ok(ProviderEvent::TextDelta(text)) => {
                         assistant_text.push_str(&text);
@@ -265,6 +346,23 @@ impl Session {
             }
 
             self.execute_tools(&tool_calls, &tx).await?;
+            if self.is_aborted().await {
+                let _ = tx.send(RunEvent::RunAborted);
+                return Ok(());
+            }
+
+            // Apply steer after the current tool batch, before the next Provider call.
+            if let Some(steer) = self.take_steer().await {
+                let steer_msg = Message::user_text(format!("[steer] {steer}"));
+                {
+                    let mut state = self.state.lock().await;
+                    state.messages.push(steer_msg.clone());
+                }
+                self.inner
+                    .store
+                    .append_message(&self.thread_id, &steer_msg)
+                    .map_err(|e| RunError::Store(e.to_string()))?;
+            }
         }
 
         let _ = tx.send(RunEvent::RunError {
@@ -279,6 +377,9 @@ impl Session {
         tx: &mpsc::UnboundedSender<RunEvent>,
     ) -> Result<(), RunError> {
         for call in calls {
+            if self.is_aborted().await {
+                return Ok(());
+            }
             let _ = tx.send(RunEvent::ToolStarted {
                 name: call.name.clone(),
                 args: call.arguments.clone(),
@@ -346,4 +447,12 @@ impl RunHandle {
         }
         events
     }
+}
+
+pub(crate) fn new_run_control() -> Arc<Mutex<RunControl>> {
+    Arc::new(Mutex::new(RunControl {
+        busy: false,
+        queue: VecDeque::new(),
+        pending_steer: None,
+    }))
 }

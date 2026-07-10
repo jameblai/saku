@@ -10,13 +10,14 @@ use crate::config::{Config, Effort};
 use crate::credentials::CredentialStore;
 use crate::index::{SharedIndex, WorkspaceIndex};
 use crate::provider::Provider;
-use crate::session::{Session, SessionState, SessionStore, StoreError};
+use crate::session::{new_run_control, Session, SessionState, SessionStore, StoreError, RunControl};
 use crate::tools::{Tool, ToolContext, ToolError, ToolRegistry, ToolResult};
 use crate::types::ToolCall;
 
 pub(crate) struct LiveSession {
     pub state: Arc<Mutex<SessionState>>,
     pub abort_tx: Arc<Mutex<watch::Sender<bool>>>,
+    pub run_control: Arc<Mutex<RunControl>>,
 }
 
 /// Shared Harness state.
@@ -112,6 +113,7 @@ impl Harness {
                 inner: Arc::clone(&self.inner),
                 state: Arc::clone(&live.state),
                 abort_tx: Arc::clone(&live.abort_tx),
+                run_control: Arc::clone(&live.run_control),
             });
         }
         let loaded = self.inner.store.load_or_create(
@@ -123,11 +125,13 @@ impl Harness {
         let state = Arc::new(Mutex::new(loaded));
         let (abort_tx, _) = watch::channel(false);
         let abort_tx = Arc::new(Mutex::new(abort_tx));
+        let run_control = new_run_control();
         sessions.insert(
             thread_id.clone(),
             LiveSession {
                 state: Arc::clone(&state),
                 abort_tx: Arc::clone(&abort_tx),
+                run_control: Arc::clone(&run_control),
             },
         );
         Ok(Session {
@@ -135,6 +139,7 @@ impl Harness {
             inner: Arc::clone(&self.inner),
             state,
             abort_tx,
+            run_control,
         })
     }
 }

@@ -1,6 +1,5 @@
 //! Serenity bot wiring.
 
-use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use saku_harness::{
@@ -8,7 +7,7 @@ use saku_harness::{
     ALLOWED_MODELS, is_allowed_model, is_supported_effort, supported_efforts,
 };
 use serenity::all::{
-    ChannelId, Context, CreateMessage, EventHandler, GatewayIntents, Message, MessageId, ReactionType,
+    ChannelId, Context, CreateMessage, EventHandler, GatewayIntents, Message, ReactionType,
 };
 use serenity::async_trait;
 use serenity::Client;
@@ -22,24 +21,10 @@ use crate::progress::{args_preview, format_progress};
 const HOURGLASS: &str = "⏳";
 const CHECKMARK: &str = "✅";
 
-struct QueuedTurn {
-    message_id: MessageId,
-    channel_id: ChannelId,
-    turn: UserTurn,
-}
-
-struct SessionQueue {
-    active: bool,
-    queue: VecDeque<QueuedTurn>,
-}
-
 struct Handler {
     harness: Harness,
     config: Config,
     bot_user_id: Mutex<Option<serenity::all::UserId>>,
-    queues: Mutex<HashMap<String, SessionQueue>>,
-    /// Pending steer text applied after the current tool batch (v1: next provider round).
-    steers: Mutex<HashMap<String, String>>,
 }
 
 pub async fn run_bot(config: Config, harness: Harness) -> Result<(), String> {
@@ -53,8 +38,6 @@ pub async fn run_bot(config: Config, harness: Harness) -> Result<(), String> {
         harness,
         config,
         bot_user_id: Mutex::new(None),
-        queues: Mutex::new(HashMap::new()),
-        steers: Mutex::new(HashMap::new()),
     };
 
     let mut client = Client::builder(token, intents)
@@ -92,11 +75,10 @@ impl EventHandler for Handler {
             None => return,
         };
 
-        // Bot commands in threads (and channels) with prefix.
         let content_for_cmd = strip_mention(&msg.content, bot_id);
         if let Some(cmd) = parse_command(&self.config.command_prefix, &content_for_cmd) {
             if let Err(err) = self.handle_command(&ctx, &msg, cmd).await {
-                warn!("command error: {err}");
+                let _ = reply_chunks(&ctx, &msg, &format!("Error: {err}")).await;
             }
             return;
         }
@@ -118,8 +100,7 @@ impl EventHandler for Handler {
             return;
         }
 
-        // Channel @mention: create or use a thread.
-        let (thread_id, channel_id) = if mentioned && !in_thread {
+        let (thread_id, _channel_id) = if mentioned && !in_thread {
             match ensure_session_thread(&ctx, &msg).await {
                 Ok(id) => (id.to_string(), id),
                 Err(err) => {
@@ -137,14 +118,8 @@ impl EventHandler for Handler {
             return;
         }
 
-        let turn = UserTurn {
-            text,
-            images,
-        };
-        if let Err(err) = self
-            .enqueue_or_run(&ctx, &msg, &thread_id, channel_id, turn)
-            .await
-        {
+        let turn = UserTurn { text, images };
+        if let Err(err) = self.run_turn(&ctx, &msg, &thread_id, turn).await {
             error!("run error: {err}");
         }
     }
@@ -168,14 +143,10 @@ impl Handler {
             BotCommand::Help => help_text(&self.config.command_prefix),
             BotCommand::Stop => {
                 session.stop().await;
-                self.drain_queue(ctx, &thread_id).await?;
                 "Stopped active Run and drained the Session queue.".into()
             }
             BotCommand::Steer(message) => {
-                self.steers
-                    .lock()
-                    .await
-                    .insert(thread_id.clone(), message);
+                session.steer(message).await;
                 "Steer noted; will apply after the current tool batch.".into()
             }
             BotCommand::Model { id: None, .. } => {
@@ -229,100 +200,6 @@ impl Handler {
         Ok(())
     }
 
-    async fn drain_queue(&self, ctx: &Context, thread_id: &str) -> Result<(), String> {
-        let mut queues = self.queues.lock().await;
-        if let Some(q) = queues.get_mut(thread_id) {
-            while let Some(item) = q.queue.pop_front() {
-                let _ = ctx
-                    .http
-                    .delete_reaction_me(
-                        item.channel_id,
-                        item.message_id,
-                        &ReactionType::Unicode(HOURGLASS.into()),
-                    )
-                    .await;
-            }
-            q.active = false;
-        }
-        Ok(())
-    }
-
-    async fn enqueue_or_run(
-        &self,
-        ctx: &Context,
-        msg: &Message,
-        thread_id: &str,
-        channel_id: ChannelId,
-        turn: UserTurn,
-    ) -> Result<(), String> {
-        let should_start;
-        {
-            let mut queues = self.queues.lock().await;
-            let entry = queues.entry(thread_id.to_string()).or_insert(SessionQueue {
-                active: false,
-                queue: VecDeque::new(),
-            });
-            if entry.active {
-                entry.queue.push_back(QueuedTurn {
-                    message_id: msg.id,
-                    channel_id,
-                    turn: turn.clone(),
-                });
-                should_start = false;
-            } else {
-                entry.active = true;
-                should_start = true;
-            }
-        }
-
-        if !should_start {
-            let _ = msg
-                .react(ctx, ReactionType::Unicode(HOURGLASS.into()))
-                .await;
-            return Ok(());
-        }
-
-        self.run_turn(ctx, msg, thread_id, turn).await?;
-        self.pump_queue(ctx, thread_id).await?;
-        Ok(())
-    }
-
-    async fn pump_queue(&self, ctx: &Context, thread_id: &str) -> Result<(), String> {
-        loop {
-            let next = {
-                let mut queues = self.queues.lock().await;
-                let Some(entry) = queues.get_mut(thread_id) else {
-                    return Ok(());
-                };
-                if let Some(item) = entry.queue.pop_front() {
-                    Some(item)
-                } else {
-                    entry.active = false;
-                    None
-                }
-            };
-            let Some(item) = next else {
-                return Ok(());
-            };
-
-            let _ = ctx
-                .http
-                .delete_reaction_me(
-                    item.channel_id,
-                    item.message_id,
-                    &ReactionType::Unicode(HOURGLASS.into()),
-                )
-                .await;
-
-            let msg = ctx
-                .http
-                .get_message(item.channel_id, item.message_id)
-                .await
-                .map_err(|e| e.to_string())?;
-            self.run_turn(ctx, &msg, thread_id, item.turn).await?;
-        }
-    }
-
     async fn run_turn(
         &self,
         ctx: &Context,
@@ -336,27 +213,42 @@ impl Handler {
             .await
             .map_err(|e| e.to_string())?;
 
-        // Apply pending steer as an extra user note on this turn if present.
-        let mut turn = turn;
-        if let Some(steer) = self.steers.lock().await.remove(thread_id) {
-            turn.text = format!("{}\n\n[steer] {steer}", turn.text);
-        }
-
         let mut handle = session.run(turn).await;
         let mut answer = String::new();
         let mut progress_lines: Vec<(String, String)> = Vec::new();
         let mut progress_msg: Option<Message> = None;
         let mut failed = false;
+        let mut aborted = false;
         let mut fail_note = String::new();
+        let mut hourglass = false;
 
         while let Some(ev) = handle.next_event().await {
             match ev {
+                RunEvent::Queued => {
+                    let _ = msg.react(ctx, ReactionType::Unicode(HOURGLASS.into())).await;
+                    hourglass = true;
+                }
+                RunEvent::Dequeued => {
+                    if hourglass {
+                        let _ = ctx
+                            .http
+                            .delete_reaction_me(
+                                msg.channel_id,
+                                msg.id,
+                                &ReactionType::Unicode(HOURGLASS.into()),
+                            )
+                            .await;
+                        hourglass = false;
+                    }
+                }
                 RunEvent::TextDelta { text } => answer.push_str(&text),
                 RunEvent::ToolStarted { name, args } => {
                     progress_lines.push((name, args_preview(&args)));
                     let body = format_progress(&progress_lines);
                     if let Some(ref mut existing) = progress_msg {
-                        let _ = existing.edit(ctx, serenity::all::EditMessage::new().content(body)).await;
+                        let _ = existing
+                            .edit(ctx, serenity::all::EditMessage::new().content(body))
+                            .await;
                     } else {
                         match msg
                             .channel_id
@@ -378,7 +270,7 @@ impl Handler {
                     fail_note = message;
                 }
                 RunEvent::RunAborted => {
-                    failed = true;
+                    aborted = true;
                     fail_note = "Run aborted.".into();
                 }
                 RunEvent::RunFinished => break,
@@ -386,11 +278,22 @@ impl Handler {
             }
         }
 
-        if failed {
+        if hourglass {
+            let _ = ctx
+                .http
+                .delete_reaction_me(
+                    msg.channel_id,
+                    msg.id,
+                    &ReactionType::Unicode(HOURGLASS.into()),
+                )
+                .await;
+        }
+
+        if failed || aborted {
             let note = if fail_note.is_empty() {
                 "Run failed.".into()
             } else {
-                format!("Run failed: {fail_note}")
+                format!("{fail_note}")
             };
             reply_chunks(ctx, msg, &note).await?;
             return Ok(());

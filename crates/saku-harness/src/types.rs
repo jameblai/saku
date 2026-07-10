@@ -48,6 +48,7 @@ impl UserTurn {
 pub enum Role {
     User,
     Assistant,
+    #[serde(rename = "tool_result")]
     Tool,
 }
 

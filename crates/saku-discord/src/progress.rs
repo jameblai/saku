@@ -31,7 +31,7 @@ pub fn args_preview(args: &Value) -> String {
         }
         other => other.to_string(),
     };
-    truncate(&raw, 80)
+    truncate_chars(&raw, 80)
 }
 
 pub fn format_progress(lines: &[(String, String)]) -> String {
@@ -39,16 +39,37 @@ pub fn format_progress(lines: &[(String, String)]) -> String {
     for (name, preview) in lines {
         out.push_str(&format!("{} {name}: {preview}\n", tool_emoji(name)));
     }
-    truncate(&out, 1900)
+    trim_oldest_to_limit(&out, 1900)
 }
 
-fn truncate(s: &str, max: usize) -> String {
+fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
         let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
         t.push('…');
         t
+    }
+}
+
+/// Prefer dropping oldest tool lines so the newest Progress stays visible (ADR 0015).
+fn trim_oldest_to_limit(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let mut lines: Vec<&str> = text.lines().collect();
+    while lines.len() > 1 && lines.join("\n").chars().count() > max {
+        lines.remove(1);
+    }
+    let joined = lines.join("\n");
+    if joined.chars().count() > max {
+        let chars: Vec<char> = joined.chars().collect();
+        let start = chars.len().saturating_sub(max.saturating_sub(1));
+        let mut t: String = chars[start..].iter().collect();
+        t.insert(0, '…');
+        t
+    } else {
+        joined
     }
 }
 

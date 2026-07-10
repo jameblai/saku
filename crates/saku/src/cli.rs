@@ -66,12 +66,8 @@ where
     Ok(match cli.command {
         None => Command::Run { config: cli.config },
         Some(CliSubcommand::Setup) => Command::Setup,
-        Some(CliSubcommand::Login {
-            id: LoginId::Codex,
-        }) => Command::LoginCodex,
-        Some(CliSubcommand::Login {
-            id: LoginId::Exa,
-        }) => Command::LoginExa,
+        Some(CliSubcommand::Login { id: LoginId::Codex }) => Command::LoginCodex,
+        Some(CliSubcommand::Login { id: LoginId::Exa }) => Command::LoginExa,
     })
 }
 

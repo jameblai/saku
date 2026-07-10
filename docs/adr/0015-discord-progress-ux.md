@@ -22,10 +22,9 @@ Saku must show live agent work in Discord without spam, and make completion obvi
 
 ### Progress Message (tools)
 
-- One reply, edited as Tools execute, lines like:
+- One reply, edited as Tools execute, lines like (no section header — the emoji lines are enough):
 
 ```text
-Tools:
 🔧 edit: `src/pages/og.png.ts`
 💻 bash: `pnpm lint`
 📖 read: `src/pages/og.png.ts`

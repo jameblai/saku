@@ -3,10 +3,13 @@
 mod store;
 
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use futures::StreamExt;
+use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, mpsc, watch};
 
 use crate::background::BackgroundProcesses;
@@ -83,6 +86,60 @@ impl Session {
 
     pub async fn snapshot(&self) -> SessionState {
         self.state.lock().await.clone()
+    }
+
+    /// Persist a new Session Working Directory (in-memory + Session Store).
+    pub async fn set_cwd(&self, cwd: PathBuf) -> Result<(), String> {
+        {
+            let mut state = self.state.lock().await;
+            state.cwd = cwd.clone();
+        }
+        self.inner
+            .store
+            .append_cwd(&self.thread_id, &cwd)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Record a Read Snapshot for `path` (fingerprint + Session Store append).
+    pub async fn record_read_snapshot(&self, path: &Path) -> Result<(), String> {
+        let (hash, mtime_secs) = file_fingerprint(path)?;
+        let snapshot = ReadSnapshot {
+            path: path.to_path_buf(),
+            hash,
+            mtime_secs,
+        };
+        {
+            let mut state = self.state.lock().await;
+            if let Some(existing) = state
+                .read_snapshots
+                .iter_mut()
+                .find(|s| s.path == snapshot.path)
+            {
+                *existing = snapshot.clone();
+            } else {
+                state.read_snapshots.push(snapshot.clone());
+            }
+        }
+        self.inner
+            .store
+            .append_read_snapshot(&self.thread_id, &snapshot)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Assert the on-disk file still matches the Session's Read Snapshot for `path`.
+    pub async fn assert_fresh_snapshot(&self, path: &Path) -> Result<(), String> {
+        let state = self.snapshot().await;
+        let Some(snap) = state.read_snapshots.iter().find(|s| s.path == path) else {
+            return Err(format!(
+                "no Read Snapshot for {}; read the file before editing",
+                path.display()
+            ));
+        };
+        let (hash, mtime_secs) = file_fingerprint(path)?;
+        if hash != snap.hash || mtime_secs != snap.mtime_secs {
+            return Err(format!("file changed since last read: {}", path.display()));
+        }
+        Ok(())
     }
 
     /// Idle / running / queued depth for `status`.
@@ -594,6 +651,28 @@ fn context_fill_for(
     let tokens = last_prompt_tokens.unwrap_or(estimated_tokens);
     let percent = (tokens as f64 / window as f64) * 100.0;
     (Some(tokens), Some(percent))
+}
+
+fn file_fingerprint(path: &Path) -> Result<(String, i64), String> {
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    let hash = hex_sha256(&bytes);
+    let mtime_secs = mtime_secs(path)?;
+    Ok((hash, mtime_secs))
+}
+
+fn mtime_secs(path: &Path) -> Result<i64, String> {
+    let meta = fs::metadata(path).map_err(|e| e.to_string())?;
+    let modified = meta.modified().map_err(|e| e.to_string())?;
+    let secs = modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    Ok(secs)
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[derive(Debug, thiserror::Error)]

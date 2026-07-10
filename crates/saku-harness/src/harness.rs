@@ -52,8 +52,12 @@ impl HarnessInner {
                 .ok_or_else(|| ToolError::Unknown(call.name.clone()))?
         };
         let abort = session.abort_tx.lock().await.subscribe();
+        let cwd = session.snapshot().await.cwd;
         let ctx = ToolContext {
             session,
+            workspace: &self.workspace,
+            cwd,
+            data_dir: &self.data_dir,
             abort,
             progress: None,
         };

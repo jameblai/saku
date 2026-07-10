@@ -1,10 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{
-    arg_string, maybe_enforce_memory_cap, ok_text, record_snapshot, require_fresh_snapshot,
-    resolve_tool_path,
-};
+use super::{arg_string, maybe_enforce_memory_cap, ok_text, resolve_tool_path};
 use crate::tools::{Tool, ToolContext, ToolError, ToolResult};
 
 pub struct WriteTool;
@@ -34,15 +31,21 @@ impl Tool for WriteTool {
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let path_arg = arg_string(&args, "path")?;
         let content = arg_string(&args, "content")?;
-        let path = resolve_tool_path(ctx.session, &path_arg).await?;
+        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, ctx.data_dir, &path_arg)?;
         if path.exists() {
-            require_fresh_snapshot(ctx.session, &path).await?;
+            ctx.session
+                .assert_fresh_snapshot(&path)
+                .await
+                .map_err(ToolError::Message)?;
         } else if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::Message(e.to_string()))?;
         }
-        maybe_enforce_memory_cap(&path, &ctx.session.inner.data_dir, &content)?;
+        maybe_enforce_memory_cap(&path, ctx.data_dir, &content)?;
         std::fs::write(&path, &content).map_err(|e| ToolError::Message(e.to_string()))?;
-        record_snapshot(ctx.session, &path).await?;
+        ctx.session
+            .record_read_snapshot(&path)
+            .await
+            .map_err(ToolError::Message)?;
         Ok(ok_text("ok"))
     }
 }

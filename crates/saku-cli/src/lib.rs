@@ -7,7 +7,9 @@ pub use setup::{parse_authorized_user_ids, setup};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use saku_harness::{Config, CredentialStore, DeviceCodeInfo, LoginNotify, login_device_code, login_exa_api_key};
+use saku_harness::{
+    Config, CredentialStore, DeviceCodeInfo, LoginNotify, login_device_code, login_exa_api_key,
+};
 
 struct StdioNotify;
 

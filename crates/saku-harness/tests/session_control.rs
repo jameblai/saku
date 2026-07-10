@@ -124,7 +124,11 @@ async fn run_after_stop_during_tool_is_not_immediately_aborted() {
         "expected first run to abort, got {first_events:?}"
     );
 
-    let second_events = session.run(UserTurn::text("continue")).await.collect().await;
+    let second_events = session
+        .run(UserTurn::text("continue"))
+        .await
+        .collect()
+        .await;
     assert!(
         second_events
             .iter()

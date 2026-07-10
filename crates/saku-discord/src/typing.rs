@@ -56,7 +56,9 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    fn counting_ping(pings: Arc<AtomicU32>) -> impl FnMut() -> std::pin::Pin<Box<dyn Future<Output = Result<(), ()>> + Send>> {
+    fn counting_ping(
+        pings: Arc<AtomicU32>,
+    ) -> impl FnMut() -> std::pin::Pin<Box<dyn Future<Output = Result<(), ()>> + Send>> {
         move || {
             let pings = pings.clone();
             Box::pin(async move {
@@ -113,11 +115,7 @@ mod tests {
             let pings_c = pings_c.clone();
             async move {
                 let n = pings_c.fetch_add(1, Ordering::SeqCst) + 1;
-                if n == 1 {
-                    Err(())
-                } else {
-                    Ok(())
-                }
+                if n == 1 { Err(()) } else { Ok(()) }
             }
         });
         tokio::task::yield_now().await;

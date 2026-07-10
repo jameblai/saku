@@ -1,5 +1,7 @@
 # Example Saku config (`~/.saku/config.toml`)
 
+Prefer **`saku setup`** for first-run (prompts for Discord bot token + Authorised User ids, then Codex Login).
+
 ```toml
 discord_token = "YOUR_BOT_TOKEN"
 authorized_user_ids = ["YOUR_DISCORD_SNOWFLAKE"]
@@ -12,4 +14,4 @@ authorized_user_ids = ["YOUR_DISCORD_SNOWFLAKE"]
 # default_effort = "medium"
 ```
 
-Then: `saku login codex` and `saku` to start the bot.
+Re-auth only: `saku login codex`. Start the bot: `saku`.

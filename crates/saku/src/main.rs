@@ -1,6 +1,6 @@
 //! Saku binary entrypoint.
 //!
-//! `saku` runs the Discord bot; `saku login` delegates to `saku-cli`.
+//! `saku` runs the Discord bot; `saku setup` / `saku login` delegate to `saku-cli`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,6 +21,13 @@ async fn main() -> ExitCode {
     };
 
     match command {
+        Command::Setup => match saku_cli::setup(None).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("saku setup: {err}");
+                ExitCode::FAILURE
+            }
+        },
         Command::LoginCodex => match saku_cli::login_codex(None).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {

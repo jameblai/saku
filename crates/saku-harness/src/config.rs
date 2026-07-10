@@ -1,6 +1,8 @@
 //! Load and resolve `config.toml` for Saku.
 
 use std::fs;
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -124,6 +126,72 @@ impl Config {
             default_effort: raw.default_effort.unwrap_or(DEFAULT_EFFORT),
         })
     }
+
+    /// Best-effort prefill for Setup: token and Authorised User ids if readable.
+    pub fn read_setup_prefill(path: impl AsRef<Path>) -> (Option<String>, Option<Vec<String>>) {
+        let Ok(text) = fs::read_to_string(path) else {
+            return (None, None);
+        };
+        let Ok(raw) = toml::from_str::<RawConfig>(&text) else {
+            return (None, None);
+        };
+        let token = raw.discord_token.filter(|s| !s.is_empty());
+        let ids = raw.authorized_user_ids.filter(|ids| !ids.is_empty());
+        (token, ids)
+    }
+
+    /// Write required Setup fields to `path` (mode `0600`), preserving optional keys.
+    pub fn write_required(
+        path: impl AsRef<Path>,
+        discord_token: &str,
+        authorized_user_ids: &[String],
+    ) -> Result<(), ConfigError> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut table = if path.exists() {
+            let text = fs::read_to_string(path)?;
+            match text.parse::<toml::Table>() {
+                Ok(t) => t,
+                Err(_) => toml::Table::new(),
+            }
+        } else {
+            toml::Table::new()
+        };
+
+        table.insert(
+            "discord_token".into(),
+            toml::Value::String(discord_token.to_string()),
+        );
+        table.insert(
+            "authorized_user_ids".into(),
+            toml::Value::Array(
+                authorized_user_ids
+                    .iter()
+                    .map(|id| toml::Value::String(id.clone()))
+                    .collect(),
+            ),
+        );
+
+        let body = toml::to_string_pretty(&table).map_err(|e| {
+            ConfigError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })?;
+
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(body.as_bytes())?;
+        file.sync_all()?;
+        let mut perms = file.metadata()?.permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(path, perms)?;
+        Ok(())
+    }
 }
 
 fn expand_path(raw: &str, home: &Path) -> Result<PathBuf, ConfigError> {
@@ -140,6 +208,7 @@ fn expand_path(raw: &str, home: &Path) -> Result<PathBuf, ConfigError> {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::NamedTempFile;
 
     fn minimal_toml() -> String {
@@ -204,5 +273,61 @@ default_effort = "high"
         write!(file, "{}", minimal_toml()).unwrap();
         let cfg = Config::load(file.path()).expect("load");
         assert_eq!(cfg.discord_token, "test-token");
+    }
+
+    #[test]
+    fn write_required_creates_loadable_config_with_mode_0600() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        Config::write_required(&path, "tok", &["111".into(), "222".into()]).expect("write");
+        let cfg = Config::load(&path).expect("load");
+        assert_eq!(cfg.discord_token, "tok");
+        assert_eq!(cfg.authorized_user_ids, vec!["111", "222"]);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn write_required_preserves_optional_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+discord_token = "old"
+authorized_user_ids = ["1"]
+command_prefix = "bot"
+workspace = "/tmp/ws"
+"#,
+        )
+        .unwrap();
+        Config::write_required(&path, "new-tok", &["9".into()]).expect("write");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("command_prefix"));
+        assert!(text.contains("workspace"));
+        let cfg = Config::load(&path).expect("load");
+        assert_eq!(cfg.discord_token, "new-tok");
+        assert_eq!(cfg.authorized_user_ids, vec!["9"]);
+        assert_eq!(cfg.command_prefix, "bot");
+        assert_eq!(cfg.workspace, PathBuf::from("/tmp/ws"));
+    }
+
+    #[test]
+    fn read_setup_prefill_best_effort() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        assert_eq!(Config::read_setup_prefill(&path), (None, None));
+        std::fs::write(
+            &path,
+            r#"
+discord_token = "pre"
+authorized_user_ids = ["42", "43"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            Config::read_setup_prefill(&path),
+            (Some("pre".into()), Some(vec!["42".into(), "43".into()]))
+        );
     }
 }

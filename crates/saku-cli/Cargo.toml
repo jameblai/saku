@@ -10,3 +10,4 @@ description = "Saku host CLI (login and config commands)"
 saku-harness = { workspace = true }
 dirs = "6"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rpassword = "7"

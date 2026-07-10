@@ -11,6 +11,8 @@ pub enum Command {
     Run { config: Option<PathBuf> },
     /// Host CLI Login for a Provider.
     LoginCodex,
+    /// Interactive Setup (config + Codex Login).
+    Setup,
 }
 
 #[derive(Debug, Parser)]
@@ -30,6 +32,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum CliSubcommand {
+    /// Interactive Setup: Discord config then Codex Login.
+    Setup,
     /// Obtain and store a Provider Credential.
     Login {
         #[command(subcommand)]
@@ -59,6 +63,7 @@ where
         None => Command::Run {
             config: cli.config,
         },
+        Some(CliSubcommand::Setup) => Command::Setup,
         Some(CliSubcommand::Login {
             provider: LoginProvider::Codex,
         }) => Command::LoginCodex,
@@ -93,6 +98,12 @@ mod tests {
     }
 
     #[test]
+    fn setup_subcommand() {
+        let cmd = parse_args(["setup"]).expect("parse");
+        assert_eq!(cmd, Command::Setup);
+    }
+
+    #[test]
     fn login_without_provider_is_error() {
         let err = parse_args(["login"]).unwrap_err();
         assert!(!err.to_string().is_empty());
@@ -100,7 +111,7 @@ mod tests {
 
     #[test]
     fn unknown_subcommand_is_error() {
-        let err = parse_args(["setup"]).unwrap_err();
+        let err = parse_args(["not-a-command"]).unwrap_err();
         assert!(!err.to_string().is_empty());
     }
 

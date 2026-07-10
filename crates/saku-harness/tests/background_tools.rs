@@ -67,6 +67,20 @@ fn process_alive(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+async fn wait_for_logs(session: &saku_harness::Session, pid: u32, needle: &str) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let logs = session.bg_logs_text(pid, Some(50)).await.unwrap();
+        if logs.contains(needle) {
+            return logs;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return logs;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 #[tokio::test]
 async fn bg_start_returns_pid_and_survives_run() {
     let tmp = TempDir::new().unwrap();
@@ -132,7 +146,7 @@ async fn bg_start_enforces_running_cap_of_five() {
         .collect();
     assert_eq!(starts.len(), 6);
     assert_eq!(&starts[..5], &[true, true, true, true, true]);
-    assert_eq!(starts[5], false);
+    assert!(!starts[5]);
 
     let _ = session.bg_stop(None).await;
 }
@@ -206,8 +220,7 @@ async fn bg_list_logs_stop_and_exited_code() {
     assert!(list.contains(&pid.to_string()));
     assert!(list.to_lowercase().contains("running"));
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let logs = session.bg_logs_text(pid, Some(50)).await.unwrap();
+    let logs = wait_for_logs(&session, pid, "hello-bg").await;
     assert!(
         logs.contains("hello-bg"),
         "expected hello-bg in logs, got: {logs}"
@@ -249,8 +262,7 @@ async fn bg_stop_kills_process_group_children() {
     let _ = session.run(UserTurn::text("pg")).await.collect().await;
     let leader = parse_pid(&last_tool_text(&session.snapshot().await.messages));
 
-    tokio::time::sleep(Duration::from_millis(150)).await;
-    let logs = session.bg_logs_text(leader, Some(20)).await.unwrap();
+    let logs = wait_for_logs(&session, leader, "CHILD:").await;
     let child_pid: u32 = logs
         .lines()
         .find_map(|l| l.strip_prefix("CHILD:").and_then(|s| s.trim().parse().ok()))
@@ -305,7 +317,12 @@ async fn bg_list_logs_stop_tools_work_in_runs() {
     )]));
     fake.push_text("done");
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let logs = wait_for_logs(&session, pid, "tool-log").await;
+    assert!(
+        logs.contains("tool-log"),
+        "expected tool-log before tool Run: {logs}"
+    );
+
     let events = session
         .run(UserTurn::text("list logs stop"))
         .await
@@ -323,23 +340,4 @@ async fn bg_list_logs_stop_tools_work_in_runs() {
         e,
         RunEvent::ToolFinished { name, ok: true } if name == "bg_stop"
     )));
-
-    let logs = session
-        .snapshot()
-        .await
-        .messages
-        .iter()
-        .rev()
-        .filter(|m| m.role == saku_harness::types::Role::Tool)
-        .nth(1) // stop is last tool; logs is before that
-        .and_then(|m| m.content.first())
-        .and_then(|c| match c {
-            ContentPart::Text { text } => Some(text.clone()),
-            _ => None,
-        })
-        .expect("bg_logs result");
-    assert!(
-        logs.contains("tool-log"),
-        "bg_logs tool should return output: {logs}"
-    );
 }

@@ -61,6 +61,18 @@ _Avoid_: token, secret, api key (as the umbrella term)
 A host CLI flow (`saku login <id>`) that obtains and stores a Credential for a Provider or Web Backend (Codex uses device-code OAuth; API-key identities accept a pasted key). Not performed inside Discord. Implemented in `saku-cli`, writing via the harness Credential store. Also run as the final step of Setup for the default Provider.
 _Avoid_: /login, sign-in (as product UI inside Discord)
 
+**Install**:
+Host-level delivery of the `saku` binary onto the machine (e.g. `curl … | bash` or `saku update`) and registration of a user-level host service so the bot survives logout. Does not itself write the Data Dir or perform Login — a typical interactive Install chains into Setup before enabling the service; non-interactive Install delivers only the binary.
+_Avoid_: Setup, onboarding, deploy (as the product term)
+
+**Update**:
+Host CLI flow (`saku update`) that replaces the installed `saku` binary from the chosen Release Channel and restarts the host service if it is running.
+_Avoid_: upgrade (alone), reinstall
+
+**Release Channel**:
+Which published binary line Install or Update resolves — **stable** (semver-tagged releases, GitHub `latest`) or **nightly** (automated prereleases from `main`). Persisted in `config.toml` (default `stable`); `saku update` follows it. Changed only by editing config, not a CLI flag.
+_Avoid_: branch, track, version pin (as the product term)
+
 **Setup**:
 A host CLI flow (`saku setup`) that collects Discord bot token and Authorised User id(s) (one prompt; comma- or space-separated snowflakes), writes those required fields into `config.toml` in the Data Dir (optional keys left to defaults; re-runs preserve existing optional keys), then runs Codex Login. `saku` auto-enters Setup when config is missing or cannot be loaded (IO, parse, or missing required fields), with best-effort prefill; if config is present but the Codex Credential is missing, it auto-runs Login only. Re-runs prefill existing config values and always finish with Login. When Setup/Login was entered automatically from bare `saku`, success continues into the bot; explicit `saku setup` exits after success.
 _Avoid_: onboarding, install, init, first-run wizard (as product terms)

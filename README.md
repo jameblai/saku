@@ -23,7 +23,7 @@ cargo install --git https://github.com/jameblai/saku
 
 1. Create a bot in the [Discord Developer Portal](https://discord.com/developers/applications)
 2. Enable **Message Content Intent**
-3. Invite it to a server — it needs to read/send messages, create threads, and add reactions (or just give it Administrator)
+3. Invite it to a server — it needs to read/send messages, create threads, and add reactions
 4. Run `saku` — paste the bot token and your Discord user id, then finish Codex login
 5. Optional: `saku login exa` for web search/extract
 

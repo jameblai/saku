@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.jpg" alt="Cherry blossoms" width="100%" />
+</p>
+
 <div align="center">
 
 # saku
@@ -30,12 +34,6 @@ A coding agent you talk to in Discord threads.
 
 Invite it to a server, @mention the bot, it opens a thread, and you get work done.
 
-<p align="center">
-  <img src="assets/banner.jpg" alt="Cherry blossoms" width="100%" />
-</p>
-
-<p align="center"><sub>Photo: <a href="https://unsplash.com/photos/0-oPmFrlubo">Iewek Gnos / Unsplash</a></sub></p>
-
 I wanted something lighter than [Hermes](https://github.com/NousResearch/hermes-agent). I was mostly using it as a Discord coding agent, but it shipped skills, connectors, and other platforms I didn’t need — Python, a long install, orders of magnitude more code than this. [pi](https://github.com/earendil-works/pi) pointed at the minimal agent loop. Saku is the cut-down version I actually wanted: one binary, Discord as the UI, enough tools to get the job done.
 
 Discord’s threading is ideal for agents — work and context stay in one place. Better than Telegram (buggy), Slack (too corporate), and the rest that don’t really do threads.
@@ -48,5 +46,7 @@ Discord’s threading is ideal for agents — work and context stay in one place
 - Fast file search (fff)
 - A minimal system prompt
 - No permission popups
+
+## License
 
 MIT

@@ -1,5 +1,6 @@
-//! Provider trait and test doubles.
+//! Provider trait and implementations.
 
+pub mod codex;
 pub mod fake;
 
 use std::pin::Pin;
@@ -9,6 +10,13 @@ use thiserror::Error;
 
 use crate::types::{ProviderEvent, Request};
 
+pub use codex::models::{
+    ALLOWED_MODELS, PROVIDER_ID as CODEX_PROVIDER_ID, default_effort_for_model, is_allowed_model,
+    is_supported_effort, supported_efforts,
+};
+pub use codex::{
+    CodexProvider, DeviceCodeInfo, LoginError, LoginNotify, create_codex_provider, login_device_code,
+};
 pub use fake::{FakeProvider, ScriptedResponse};
 
 #[derive(Debug, Error)]

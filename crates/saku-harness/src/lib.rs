@@ -19,7 +19,12 @@ pub use credentials::{Credential, CredentialError, CredentialStore};
 pub use harness::{Harness, HarnessError};
 pub use memory::{MEMORY_CHAR_LIMIT, MemoryError, memory_path, read_memory, validate_memory_write};
 pub use path::{PathError, resolve_in_workspace};
-pub use provider::{FakeProvider, Provider, ProviderError, ScriptedResponse};
+pub use provider::{
+    ALLOWED_MODELS, CODEX_PROVIDER_ID, CodexProvider, DeviceCodeInfo, FakeProvider, LoginError,
+    LoginNotify, Provider, ProviderError, ScriptedResponse, create_codex_provider,
+    default_effort_for_model, is_allowed_model, is_supported_effort, login_device_code,
+    supported_efforts,
+};
 pub use session::{RunHandle, Session, SessionState, SessionStore};
 pub use tools::{Tool, ToolError, ToolResult, file_tools, search_tools, shell_tools};
 pub use types::{ContentPart, Message, Request, RunEvent, UserTurn};

@@ -8,3 +8,5 @@ description = "Saku host CLI (login and config commands)"
 
 [dependencies]
 saku-harness = { workspace = true }
+dirs = "6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

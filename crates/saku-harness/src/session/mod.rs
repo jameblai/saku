@@ -60,6 +60,46 @@ impl Session {
         let _ = self.abort_tx.lock().await.send(true);
     }
 
+    pub async fn set_model(&self, model: impl Into<String>) -> Result<(), String> {
+        let model = model.into();
+        if !crate::provider::is_allowed_model(&model) {
+            return Err(format!(
+                "unsupported model `{model}`; allowed: {}",
+                crate::provider::ALLOWED_MODELS.join(", ")
+            ));
+        }
+        let effort = crate::provider::default_effort_for_model(&model);
+        {
+            let mut state = self.state.lock().await;
+            state.model = model.clone();
+            state.effort = effort;
+        }
+        self.inner
+            .store
+            .append_model(&self.thread_id, &model)
+            .map_err(|e| e.to_string())?;
+        self.inner
+            .store
+            .append_effort(&self.thread_id, effort)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn set_effort(&self, effort: Effort) -> Result<(), String> {
+        let model = self.state.lock().await.model.clone();
+        if !crate::provider::is_supported_effort(&model, effort) {
+            return Err(format!(
+                "unsupported effort `{effort}` for model `{model}`"
+            ));
+        }
+        self.state.lock().await.effort = effort;
+        self.inner
+            .store
+            .append_effort(&self.thread_id, effort)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub(crate) async fn reset_abort(&self) {
         let _ = self.abort_tx.lock().await.send(false);
     }

@@ -25,6 +25,7 @@ fn test_config(tmp: &TempDir) -> Config {
         default_model: "gpt-5.5".into(),
         default_effort: Effort::Medium,
         web_backend: "exa".into(),
+        release_channel: saku_harness::ReleaseChannel::Stable,
     }
 }
 

@@ -44,7 +44,29 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Update => match saku_cli::update().await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("saku update: {err}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::ServiceInstall => service_cmd(saku_cli::install),
+        Command::ServiceUninstall => service_cmd(saku_cli::uninstall),
+        Command::ServiceEnable => service_cmd(saku_cli::enable),
+        Command::ServiceDisable => service_cmd(saku_cli::disable),
+        Command::ServiceStatus => service_cmd(saku_cli::status),
         Command::Run { config } => run_bot_cmd(config).await,
+    }
+}
+
+fn service_cmd(f: fn() -> Result<(), String>) -> ExitCode {
+    match f() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("saku service: {err}");
+            ExitCode::FAILURE
+        }
     }
 }
 

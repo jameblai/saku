@@ -20,7 +20,7 @@ pub mod vision;
 pub mod web_backend;
 
 pub use background::{BackgroundProcesses, BgStatus, MAX_RUNNING};
-pub use config::{Config, ConfigError, Effort};
+pub use config::{Config, ConfigError, Effort, ReleaseChannel};
 pub use credentials::{Credential, CredentialError, CredentialStore};
 pub use harness::{Harness, HarnessError};
 pub use memory::{MEMORY_CHAR_LIMIT, MemoryError, memory_path, read_memory, validate_memory_write};

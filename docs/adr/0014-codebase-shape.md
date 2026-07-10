@@ -88,6 +88,7 @@ Optional with defaults:
 - `default_model` = `"gpt-5.5"`
 - `default_effort` = `"medium"`
 - `web_backend` = `"exa"`
+- `release_channel` = `"stable"`
 
 Tuning knobs (compaction thresholds, image max dimension, etc.) stay code defaults until needed.
 

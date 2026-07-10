@@ -16,8 +16,16 @@
 ## Get running
 
 ```bash
-cargo install --git https://github.com/jameblai/saku
+curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.1.0/scripts/install.sh | bash
 ```
+
+This installs a prebuilt Linux binary for x86_64 or aarch64, guides you through Setup, and starts a user systemd service. To use the nightly Release Channel instead, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.1.0/scripts/install.sh | bash -s -- --channel nightly
+```
+
+Non-interactive installs deliver the binary only.
 
 ## Setup
 
@@ -52,7 +60,7 @@ Discord’s threading is ideal for agents — work and context stay in one place
 
 ## Contributing
 
-This is mostly a personal project. Small, focused PRs are welcome — big drive-by refactors or thousand-line dumps probably aren't. If you're unsure whether something fits, open an issue first.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

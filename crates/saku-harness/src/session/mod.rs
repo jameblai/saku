@@ -9,6 +9,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use tokio::sync::{Mutex, mpsc, watch};
 
+use crate::background::BackgroundProcesses;
 use crate::compaction::{
     DEFAULT_COMPACTION_TOKEN_LIMIT, DEFAULT_KEEP_RECENT, compact_messages, default_local_summarize,
     estimate_tokens,
@@ -70,6 +71,7 @@ pub struct Session {
     pub(crate) state: Arc<Mutex<SessionState>>,
     pub(crate) abort_tx: Arc<Mutex<watch::Sender<bool>>>,
     pub(crate) run_control: Arc<Mutex<RunControl>>,
+    pub(crate) background: Arc<BackgroundProcesses>,
 }
 
 impl Session {
@@ -139,6 +141,7 @@ impl Session {
         let estimated = estimate_tokens(&state.messages, &system) as u64;
         let (context_tokens, context_fill_percent) =
             context_fill_for(state.last_prompt_tokens, estimated, window);
+        let (bg_running, bg_exited) = self.background.summary().await;
         StatusReport {
             model: state.model,
             effort: state.effort,
@@ -155,7 +158,25 @@ impl Session {
             provider: provider.into(),
             account,
             account_error,
+            background_running: bg_running,
+            background_exited: bg_exited,
         }
+    }
+
+    /// List this Session's Background Processes (running and exited).
+    pub async fn bg_list_text(&self) -> String {
+        self.background.list_text().await
+    }
+
+    /// Tail logs for a Background Process.
+    pub async fn bg_logs_text(&self, pid: u32, lines: Option<usize>) -> Result<String, String> {
+        self.background.logs_text(pid, lines).await
+    }
+
+    /// Stop one Background Process by pid, or all running when `pid` is `None`.
+    /// Does not abort the active Run (`Session::stop` / `saku stop`).
+    pub async fn bg_stop(&self, pid: Option<u32>) -> Result<String, String> {
+        self.background.stop(pid).await
     }
 
     /// Abort the active Run and drain the Session Run Queue.

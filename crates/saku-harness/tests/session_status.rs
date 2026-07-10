@@ -130,6 +130,7 @@ async fn status_report_formats_session_and_config() {
         .await;
     let text = format_status(&report);
     assert!(text.contains("Runs: 1"));
+    assert!(text.contains("Background: 0 running, 0 exited"));
     assert!(text.contains("Tokens: input 1000 / output 0 / cache read 0 / cache write 0"));
     assert!(text.contains("Provider: `codex`"));
     assert!(text.contains("Plan Usage unavailable: offline"));

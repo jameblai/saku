@@ -67,6 +67,10 @@ pub struct StatusReport {
     pub provider: String,
     pub account: Option<CodexAccountStatus>,
     pub account_error: Option<String>,
+    /// Running Background Processes in this Session.
+    pub background_running: usize,
+    /// Exited (still listed) Background Processes in this Session.
+    pub background_exited: usize,
 }
 
 /// Format a plain-text status reply (Discord-safe).
@@ -89,6 +93,10 @@ pub fn format_status(report: &StatusReport) -> String {
         }
         RunState::Idle => out.push_str("Run state: idle\n"),
     }
+    out.push_str(&format!(
+        "Background: {} running, {} exited\n",
+        report.background_running, report.background_exited
+    ));
     out.push_str(&format!("Runs: {}\n", report.run_count));
     out.push_str(&format_context_fill(report));
     out.push_str(&format!(
@@ -282,6 +290,8 @@ mod tests {
                 ),
             }),
             account_error: None,
+            background_running: 0,
+            background_exited: 0,
         }
     }
 
@@ -293,6 +303,7 @@ mod tests {
         assert!(text.contains("Effort: `high`"));
         assert!(text.contains("Working Directory: `/home/james/ws`"));
         assert!(text.contains("Run state: idle"));
+        assert!(text.contains("Background: 0 running, 0 exited"));
         assert!(text.contains("Runs: 3"));
         assert!(text.contains("Context: 12% (34000/272000)"));
         assert!(text.contains("Tokens: input 1000 / output 200 / cache read 500 / cache write 0"));

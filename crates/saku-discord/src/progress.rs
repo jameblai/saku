@@ -12,6 +12,7 @@ pub fn tool_emoji(name: &str) -> &'static str {
         "grep" => "🔎",
         "ls" => "📁",
         "cd" => "📂",
+        "bg_start" | "bg_list" | "bg_logs" | "bg_stop" => "🧵",
         _ => "🛠️",
     }
 }

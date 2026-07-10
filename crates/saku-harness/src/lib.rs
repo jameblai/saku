@@ -2,6 +2,7 @@
 //!
 //! No Discord / Serenity types live in this crate.
 
+pub mod background;
 pub mod compaction;
 pub mod config;
 pub mod credentials;
@@ -18,6 +19,7 @@ pub mod types;
 pub mod vision;
 pub mod web_backend;
 
+pub use background::{BackgroundProcesses, BgStatus, MAX_RUNNING};
 pub use config::{Config, ConfigError, Effort};
 pub use credentials::{Credential, CredentialError, CredentialStore};
 pub use harness::{Harness, HarnessError};
@@ -35,8 +37,8 @@ pub use status::{
     format_status,
 };
 pub use tools::{
-    Tool, ToolError, ToolResult, file_tools, register_web_tools, search_tools, shell_tools,
-    web_tools, web_tools_from_store,
+    Tool, ToolError, ToolResult, background_tools, file_tools, register_web_tools, search_tools,
+    shell_tools, web_tools, web_tools_from_store,
 };
 pub use types::{ContentPart, Message, Request, RunEvent, TokenUsage, UserTurn};
 pub use vision::{is_image_mime, is_image_path, resize_for_provider};

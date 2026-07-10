@@ -52,8 +52,11 @@ pub struct CodexAccountStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub enum WebBackendStatus {
     NoCredential,
-    Connected { team_name: String },
-    Unavailable { reason: String },
+    /// An API-key Credential is stored for the configured Web Backend.
+    CredentialConfigured,
+    Unavailable {
+        reason: String,
+    },
 }
 
 /// Snapshot assembled for `saku status`.
@@ -174,9 +177,7 @@ pub fn format_status(report: &StatusReport) -> String {
     out.push_str(&format!("Backend: `{}`\n", report.web_backend));
     match &report.web_status {
         WebBackendStatus::NoCredential => out.push_str("no Credential\n"),
-        WebBackendStatus::Connected { team_name } => {
-            out.push_str(&format!("Connected: `{team_name}`\n"));
-        }
+        WebBackendStatus::CredentialConfigured => out.push_str("Credential configured\n"),
         WebBackendStatus::Unavailable { reason } => {
             out.push_str(&format!("Web Backend unavailable: {reason}\n"));
         }
@@ -380,13 +381,11 @@ mod tests {
     }
 
     #[test]
-    fn format_status_web_backend_connected_shows_team() {
+    fn format_status_web_backend_credential_configured() {
         let mut report = sample_report();
-        report.web_status = WebBackendStatus::Connected {
-            team_name: "Acme Labs".into(),
-        };
+        report.web_status = WebBackendStatus::CredentialConfigured;
         let text = format_status(&report);
-        assert!(text.contains("Connected: `Acme Labs`"));
+        assert!(text.contains("Credential configured\n"));
         assert!(!text.contains("no Credential"));
     }
 

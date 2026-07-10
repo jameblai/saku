@@ -70,8 +70,10 @@ x-api-key: YOUR-EXA-API-KEY
 - `concurrency.active` / `concurrency.queued`
 - `limits.maxConcurrent` / `limits.maxQueued` (`null` = unlimited)
 
-**Useful for:** validating the key and showing team name / Websets concurrency.  
+**Useful for:** validating the key *only if* the key can access Websets.  
 **Not useful for:** credit balance, search/contents QPS remaining, or billing plan. Docs frame it as Websets concurrency monitoring ([Get Team Info](https://docs.exa.ai/websets/api/teams/get-team-info)).
+
+**Saku note (2026-07-11):** A search-capable API key can return **401** on `/websets/v0/teams/me` while `/search` still works. Saku’s `status` therefore does **not** live-probe Exa — it only reports whether an API-key Credential is stored for the configured Web Backend.
 
 ### 3. Per-request `costDollars` on Search / Contents (and Agent `usage`)
 

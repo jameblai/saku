@@ -118,38 +118,6 @@ impl ExaClient {
         };
         Ok(result.text.unwrap_or_default())
     }
-
-    /// `GET /websets/v0/teams/me` — validate key and return team name (status probe).
-    pub async fn team_info(&self) -> Result<ExaTeamInfo, ExaError> {
-        let response = self
-            .http
-            .get(format!(
-                "{}/websets/v0/teams/me",
-                self.base_url.trim_end_matches('/')
-            ))
-            .header("x-api-key", &self.api_key)
-            .send()
-            .await?;
-        let status = response.status();
-        let text = response.text().await?;
-        if !status.is_success() {
-            return Err(ExaError::Api {
-                status: status.as_u16(),
-                body: text,
-            });
-        }
-        let parsed: TeamInfoResponse = serde_json::from_str(&text)
-            .map_err(|e| ExaError::Message(format!("invalid team info response: {e}")))?;
-        Ok(ExaTeamInfo {
-            team_name: parsed.name.unwrap_or_else(|| "(unnamed team)".into()),
-        })
-    }
-}
-
-/// Team identity from Exa's status probe.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExaTeamInfo {
-    pub team_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,12 +144,6 @@ struct ContentsResponse {
 struct ContentsHit {
     #[serde(default)]
     text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TeamInfoResponse {
-    #[serde(default)]
-    name: Option<String>,
 }
 
 fn format_search_hits(hits: &[SearchHit]) -> String {

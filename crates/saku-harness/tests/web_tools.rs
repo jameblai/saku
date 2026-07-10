@@ -371,45 +371,21 @@ async fn web_extract_truncates_at_30000_chars() {
     );
 }
 
-#[tokio::test]
-async fn team_info_returns_team_name_via_fake_http() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/websets/v0/teams/me"))
-        .and(header("x-api-key", "probe-key"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "object": "team",
-            "id": "team_1",
-            "name": "Acme Labs"
-        })))
-        .mount(&server)
-        .await;
-
-    let client = ExaClient::new("probe-key").with_base_url(server.uri());
-    let info = client.team_info().await.expect("team_info");
-    assert_eq!(info.team_name, "Acme Labs");
-}
-
-#[tokio::test]
-async fn team_info_maps_api_errors() {
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/websets/v0/teams/me"))
-        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
-        .mount(&server)
-        .await;
-
-    let client = ExaClient::new("bad").with_base_url(server.uri());
-    let err = client.team_info().await.expect_err("should fail");
-    let msg = err.to_string();
-    assert!(msg.contains("401"), "{msg}");
-}
-
-#[tokio::test]
-async fn fetch_web_backend_status_no_credential() {
+#[test]
+fn fetch_web_backend_status_no_credential() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
     let store = saku_harness::CredentialStore::open(&config.data_dir).unwrap();
-    let status = saku_harness::fetch_web_backend_status(&store, "exa").await;
+    let status = saku_harness::fetch_web_backend_status(&store, "exa");
     assert_eq!(status, saku_harness::WebBackendStatus::NoCredential);
+}
+
+#[test]
+fn fetch_web_backend_status_credential_configured() {
+    let tmp = TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let store = saku_harness::CredentialStore::open(&config.data_dir).unwrap();
+    login_exa_api_key(&store, "test-exa-key").unwrap();
+    let status = saku_harness::fetch_web_backend_status(&store, "exa");
+    assert_eq!(status, saku_harness::WebBackendStatus::CredentialConfigured);
 }

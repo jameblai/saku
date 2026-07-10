@@ -114,8 +114,7 @@ impl Session {
         let web_status = crate::web_backend::fetch_web_backend_status(
             &self.inner.credentials,
             &self.inner.web_backend,
-        )
-        .await;
+        );
         let report = self
             .status_report(
                 &self.inner.default_model,

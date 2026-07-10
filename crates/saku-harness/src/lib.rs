@@ -43,6 +43,5 @@ pub use tools::{
 pub use types::{ContentPart, Message, Request, RunEvent, TokenUsage, UserTurn};
 pub use vision::{is_image_mime, is_image_path, resize_for_provider};
 pub use web_backend::{
-    EXA_WEB_BACKEND_ID, ExaClient, ExaError, ExaTeamInfo, fetch_web_backend_status,
-    login_exa_api_key,
+    EXA_WEB_BACKEND_ID, ExaClient, ExaError, fetch_web_backend_status, login_exa_api_key,
 };

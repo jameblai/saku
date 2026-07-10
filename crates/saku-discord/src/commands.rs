@@ -109,7 +109,7 @@ pub fn help_text(prefix: &str) -> String {
          - `{prefix} steer <message>` — redirect after current tool batch\n\
          - `{prefix} model` / `{prefix} model <id> [effort]`\n\
          - `{prefix} effort` / `{prefix} effort <level>`\n\
-         - `{prefix} status` — Session, config, and Codex Plan Usage\n\
+         - `{prefix} status` — Session, Tools, config, Codex Plan Usage, Web Backend\n\
          - `{prefix} bg` — list Background Processes\n\
          - `{prefix} bg logs <pid>` — tail Background Process logs\n\
          - `{prefix} bg stop <pid>` — stop one Background Process\n\
@@ -145,6 +145,8 @@ mod tests {
     fn help_lists_status() {
         let text = help_text("saku");
         assert!(text.contains("`saku status`"));
+        assert!(text.contains("Tools"));
+        assert!(text.contains("Web Backend"));
     }
 
     #[test]

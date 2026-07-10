@@ -48,6 +48,14 @@ pub struct CodexAccountStatus {
     pub reset_credit_expires_at: Option<i64>,
 }
 
+/// Web Backend line(s) for `saku status`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WebBackendStatus {
+    NoCredential,
+    Connected { team_name: String },
+    Unavailable { reason: String },
+}
+
 /// Snapshot assembled for `saku status`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusReport {
@@ -71,6 +79,11 @@ pub struct StatusReport {
     pub background_running: usize,
     /// Exited (still listed) Background Processes in this Session.
     pub background_exited: usize,
+    /// Tool names currently registered on the Harness (registration order).
+    pub tool_names: Vec<String>,
+    /// Configured Web Backend id (e.g. `exa`).
+    pub web_backend: String,
+    pub web_status: WebBackendStatus,
 }
 
 /// Format a plain-text status reply (Discord-safe).
@@ -104,6 +117,17 @@ pub fn format_status(report: &StatusReport) -> String {
         report.usage.input, report.usage.output, report.usage.cache_read, report.usage.cache_write
     ));
     out.push_str(&format!("Est. cost: ${:.4}\n", report.estimated_cost_usd));
+
+    out.push_str("\n**Tools**\n");
+    if !report.tool_names.is_empty() {
+        let names: Vec<String> = report
+            .tool_names
+            .iter()
+            .map(|n| format!("`{n}`"))
+            .collect();
+        out.push_str(&names.join(" "));
+        out.push('\n');
+    }
 
     out.push_str("\n**Config**\n");
     out.push_str(&format!("Default model: `{}`\n", report.default_model));
@@ -148,6 +172,18 @@ pub fn format_status(report: &StatusReport) -> String {
         }
     } else {
         out.push_str("Plan Usage unavailable\n");
+    }
+
+    out.push_str("\n**Web Backend**\n");
+    out.push_str(&format!("Backend: `{}`\n", report.web_backend));
+    match &report.web_status {
+        WebBackendStatus::NoCredential => out.push_str("no Credential\n"),
+        WebBackendStatus::Connected { team_name } => {
+            out.push_str(&format!("Connected: `{team_name}`\n"));
+        }
+        WebBackendStatus::Unavailable { reason } => {
+            out.push_str(&format!("Web Backend unavailable: {reason}\n"));
+        }
     }
 
     out
@@ -292,6 +328,15 @@ mod tests {
             account_error: None,
             background_running: 0,
             background_exited: 0,
+            tool_names: vec![
+                "read".into(),
+                "edit".into(),
+                "write".into(),
+                "bash".into(),
+                "web_search".into(),
+            ],
+            web_backend: "exa".into(),
+            web_status: WebBackendStatus::NoCredential,
         }
     }
 
@@ -316,6 +361,47 @@ mod tests {
         assert!(text.contains("Plan Usage 5h: 96% left"));
         assert!(text.contains("Plan Usage weekly: 80% left"));
         assert!(text.contains("Reset Credits: 2 available"));
+    }
+
+    #[test]
+    fn format_status_lists_registered_tool_names_after_session() {
+        let text = format_status(&sample_report());
+        let session_pos = text.find("**Session**").expect("Session");
+        let tools_pos = text.find("**Tools**").expect("Tools");
+        let config_pos = text.find("**Config**").expect("Config");
+        assert!(session_pos < tools_pos && tools_pos < config_pos);
+        assert!(text.contains("`read` `edit` `write` `bash` `web_search`"));
+    }
+
+    #[test]
+    fn format_status_web_backend_after_codex_no_credential() {
+        let text = format_status(&sample_report());
+        let codex_pos = text.find("**Codex account**").expect("Codex");
+        let web_pos = text.find("**Web Backend**").expect("Web Backend");
+        assert!(codex_pos < web_pos);
+        assert!(text.contains("Backend: `exa`"));
+        assert!(text.contains("no Credential"));
+    }
+
+    #[test]
+    fn format_status_web_backend_connected_shows_team() {
+        let mut report = sample_report();
+        report.web_status = WebBackendStatus::Connected {
+            team_name: "Acme Labs".into(),
+        };
+        let text = format_status(&report);
+        assert!(text.contains("Connected: `Acme Labs`"));
+        assert!(!text.contains("no Credential"));
+    }
+
+    #[test]
+    fn format_status_web_backend_unavailable_mirrors_codex() {
+        let mut report = sample_report();
+        report.web_status = WebBackendStatus::Unavailable {
+            reason: "auth expired".into(),
+        };
+        let text = format_status(&report);
+        assert!(text.contains("Web Backend unavailable: auth expired"));
     }
 
     #[test]

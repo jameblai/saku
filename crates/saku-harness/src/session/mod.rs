@@ -19,7 +19,7 @@ use crate::harness::HarnessInner;
 use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
 use crate::prompt::build_system_prompt;
 use crate::provider::codex::models::{context_window_for, rates_for};
-use crate::status::{CodexAccountStatus, RunState, StatusReport, estimate_cost_usd};
+use crate::status::{CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd};
 use crate::types::{
     Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, UserTurn,
 };
@@ -99,7 +99,7 @@ impl Session {
         }
     }
 
-    /// Full `saku status` text: Session snapshot + live Codex account (best-effort).
+    /// Full `saku status` text: Session snapshot + live Codex / Web Backend (best-effort).
     pub async fn status_text(&self) -> String {
         let client = reqwest::Client::new();
         let (account, account_error) =
@@ -109,6 +109,11 @@ impl Session {
                 Ok(account) => (Some(account), None),
                 Err(err) => (None, Some(err.to_string())),
             };
+        let web_status = crate::web_backend::fetch_web_backend_status(
+            &self.inner.credentials,
+            &self.inner.web_backend,
+        )
+        .await;
         let report = self
             .status_report(
                 &self.inner.default_model,
@@ -116,6 +121,7 @@ impl Session {
                 crate::provider::CODEX_PROVIDER_ID,
                 account,
                 account_error,
+                web_status,
             )
             .await;
         crate::status::format_status(&report)
@@ -129,6 +135,7 @@ impl Session {
         provider: &str,
         account: Option<CodexAccountStatus>,
         account_error: Option<String>,
+        web_status: WebBackendStatus,
     ) -> StatusReport {
         let state = self.snapshot().await;
         let run_state = self.run_state().await;
@@ -142,6 +149,15 @@ impl Session {
         let (context_tokens, context_fill_percent) =
             context_fill_for(state.last_prompt_tokens, estimated, window);
         let (bg_running, bg_exited) = self.background.summary().await;
+        let tool_names = self
+            .inner
+            .tools
+            .lock()
+            .await
+            .definitions()
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         StatusReport {
             model: state.model,
             effort: state.effort,
@@ -160,6 +176,9 @@ impl Session {
             account_error,
             background_running: bg_running,
             background_exited: bg_exited,
+            tool_names,
+            web_backend: self.inner.web_backend.clone(),
+            web_status,
         }
     }
 

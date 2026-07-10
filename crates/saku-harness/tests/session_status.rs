@@ -126,6 +126,7 @@ async fn status_report_formats_session_and_config() {
             CODEX_PROVIDER_ID,
             None,
             Some("offline".into()),
+            saku_harness::WebBackendStatus::NoCredential,
         )
         .await;
     let text = format_status(&report);
@@ -135,4 +136,39 @@ async fn status_report_formats_session_and_config() {
     assert!(text.contains("Provider: `codex`"));
     assert!(text.contains("Plan Usage unavailable: offline"));
     assert!(text.contains("Context:"));
+    assert!(text.contains("**Tools**"));
+    assert!(text.contains("**Web Backend**"));
+    assert!(text.contains("Backend: `exa`"));
+    assert!(text.contains("no Credential"));
+}
+
+#[tokio::test]
+async fn status_report_lists_registered_tools_in_order() {
+    let tmp = TempDir::new().unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    let cfg = config(&tmp);
+    let harness = Harness::new(cfg.clone(), fake).unwrap();
+    for tool in saku_harness::file_tools() {
+        harness.register_tool(tool).await;
+    }
+    for tool in saku_harness::shell_tools() {
+        harness.register_tool(tool).await;
+    }
+    let session = harness.session("status-tools").await.unwrap();
+    let report = session
+        .status_report(
+            &cfg.default_model,
+            cfg.default_effort,
+            CODEX_PROVIDER_ID,
+            None,
+            None,
+            saku_harness::WebBackendStatus::NoCredential,
+        )
+        .await;
+    assert_eq!(
+        report.tool_names,
+        vec!["read", "edit", "write", "bash", "cd"]
+    );
+    let text = format_status(&report);
+    assert!(text.contains("`read` `edit` `write` `bash` `cd`"));
 }

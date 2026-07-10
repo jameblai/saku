@@ -20,24 +20,46 @@ pub fn args_preview(args: &Value) -> String {
     let raw = match args {
         Value::Object(map) => {
             if let Some(cmd) = map.get("command").and_then(|v| v.as_str()) {
-                format!("\"{cmd}\"")
+                cmd.to_string()
             } else if let Some(path) = map.get("path").and_then(|v| v.as_str()) {
-                format!("\"{path}\"")
+                path.to_string()
             } else if let Some(pattern) = map.get("pattern").and_then(|v| v.as_str()) {
-                format!("\"{pattern}\"")
+                pattern.to_string()
             } else {
                 args.to_string()
             }
         }
         other => other.to_string(),
     };
-    // Truncate before escaping so a cut never splits a `\|` sequence.
-    escape_discord_pipes(&truncate_chars(&raw, 80))
+    // Collapse → truncate → fence so newlines can't break the span and truncation
+    // never chops the closing delimiter (ADR 0015).
+    discord_inline_code(&truncate_chars(&collapse_whitespace(&raw), 80))
 }
 
-/// Discord spoilers use `||…||`; bash `||` and regex `|` must not reach the client raw.
-fn escape_discord_pipes(s: &str) -> String {
-    s.replace('|', "\\|")
+/// Collapse runs of whitespace (including newlines) to a single space.
+fn collapse_whitespace(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Wrap `content` in a Discord inline code span. Fence length is one longer than
+/// the longest backtick run inside; pad with spaces when content starts/ends with `` ` ``.
+fn discord_inline_code(content: &str) -> String {
+    let mut max_run = 0usize;
+    let mut run = 0usize;
+    for c in content.chars() {
+        if c == '`' {
+            run += 1;
+            max_run = max_run.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    let fence = "`".repeat(max_run + 1);
+    if content.starts_with('`') || content.ends_with('`') {
+        format!("{fence} {content} {fence}")
+    } else {
+        format!("{fence}{content}{fence}")
+    }
 }
 
 pub fn format_progress(lines: &[(String, String)]) -> String {
@@ -87,8 +109,8 @@ mod tests {
     #[test]
     fn formats_progress_with_emoji() {
         let text = format_progress(&[
-            ("bash".into(), "\"ls\"".into()),
-            ("read".into(), "\"a.rs\"".into()),
+            ("bash".into(), "`ls`".into()),
+            ("read".into(), "`a.rs`".into()),
         ]);
         assert!(text.contains("💻 bash:"));
         assert!(text.contains("📖 read:"));
@@ -96,22 +118,39 @@ mod tests {
 
     #[test]
     fn args_preview_prefers_command_path_pattern() {
-        assert_eq!(args_preview(&json!({"command": "pwd"})), "\"pwd\"");
-        assert_eq!(args_preview(&json!({"path": "src"})), "\"src\"");
+        assert_eq!(args_preview(&json!({"command": "pwd"})), "`pwd`");
+        assert_eq!(args_preview(&json!({"path": "src"})), "`src`");
+        assert_eq!(args_preview(&json!({"pattern": "foo"})), "`foo`");
     }
 
     #[test]
-    fn args_preview_escapes_discord_spoiler_markers() {
+    fn args_preview_wraps_pipes_in_inline_code_without_backslash_escape() {
         let preview = args_preview(&json!({"command": "false || true"}));
-        assert_eq!(preview, r#""false \|\| true""#);
+        assert_eq!(preview, "`false || true`");
         assert_eq!(
             args_preview(&json!({"command": r#"pgrep -af "a|b""#})),
-            r#""pgrep -af "a\|b"""#
+            "`pgrep -af \"a|b\"`"
         );
-        let body = format_progress(&[("bash".into(), preview)]);
-        assert!(
-            !body.contains("||"),
-            "Progress Message must not contain raw || (Discord spoiler syntax)"
+    }
+
+    #[test]
+    fn args_preview_collapses_whitespace_before_fencing() {
+        let preview = args_preview(&json!({
+            "command": "false || true\nsleep 1\necho hi"
+        }));
+        assert_eq!(preview, "`false || true sleep 1 echo hi`");
+        assert!(!preview.contains('\n'));
+    }
+
+    #[test]
+    fn args_preview_uses_longer_fence_when_content_has_backticks() {
+        assert_eq!(
+            args_preview(&json!({"command": "echo `whoami`"})),
+            "`` echo `whoami` ``"
+        );
+        assert_eq!(
+            args_preview(&json!({"command": "``already``"})),
+            "``` ``already`` ```"
         );
     }
 }

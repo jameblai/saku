@@ -25,6 +25,7 @@ fn config(tmp: &TempDir) -> Config {
         default_model: "gpt-5.5".into(),
         default_effort: Effort::Medium,
         web_backend: "exa".into(),
+        release_channel: saku_harness::ReleaseChannel::Stable,
     }
 }
 
@@ -79,6 +80,7 @@ async fn cd_and_bash_use_working_directory() {
             default_model: "gpt-5.5".into(),
             default_effort: Effort::Medium,
             web_backend: "exa".into(),
+            release_channel: saku_harness::ReleaseChannel::Stable,
         },
         Arc::new(FakeProvider::new()),
     )

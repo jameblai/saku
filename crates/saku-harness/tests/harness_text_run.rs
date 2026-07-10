@@ -23,6 +23,7 @@ fn test_config(tmp: &TempDir) -> Config {
         default_model: "gpt-5.5".into(),
         default_effort: Effort::Medium,
         web_backend: "exa".into(),
+        release_channel: saku_harness::ReleaseChannel::Stable,
     }
 }
 
@@ -62,6 +63,7 @@ async fn text_only_run_streams_events_and_persists_transcript() {
         default_model: "gpt-5.5".into(),
         default_effort: Effort::Medium,
         web_backend: "exa".into(),
+        release_channel: saku_harness::ReleaseChannel::Stable,
     };
     let harness2 = Harness::new(config2, Arc::new(FakeProvider::new())).unwrap();
     let session2 = harness2.session("thread-1").await.unwrap();

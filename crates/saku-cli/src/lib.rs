@@ -1,8 +1,10 @@
 //! Host CLI: `login`, Setup, and config-related commands that do not need Discord.
 
 mod setup;
+pub mod update;
 
 pub use setup::{parse_authorized_user_ids, setup};
+pub use update::update;
 
 use std::io::{self, Write};
 use std::path::PathBuf;

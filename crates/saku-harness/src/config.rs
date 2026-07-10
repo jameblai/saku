@@ -20,6 +20,29 @@ pub const DEFAULT_EFFORT: Effort = Effort::Medium;
 /// Default Web Backend id.
 pub const DEFAULT_WEB_BACKEND: &str = "exa";
 
+/// Release line used by Install and Update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReleaseChannel {
+    Stable,
+    Nightly,
+}
+
+impl ReleaseChannel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Nightly => "nightly",
+        }
+    }
+}
+
+impl std::fmt::Display for ReleaseChannel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Reasoning / thinking level for a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -73,6 +96,7 @@ struct RawConfig {
     default_model: Option<String>,
     default_effort: Option<Effort>,
     web_backend: Option<String>,
+    release_channel: Option<ReleaseChannel>,
 }
 
 /// Resolved Saku configuration.
@@ -86,6 +110,7 @@ pub struct Config {
     pub default_model: String,
     pub default_effort: Effort,
     pub web_backend: String,
+    pub release_channel: ReleaseChannel,
 }
 
 impl Config {
@@ -133,6 +158,7 @@ impl Config {
                 .web_backend
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| DEFAULT_WEB_BACKEND.to_string()),
+            release_channel: raw.release_channel.unwrap_or(ReleaseChannel::Stable),
         })
     }
 
@@ -240,6 +266,7 @@ authorized_user_ids = ["111", "222"]
         assert_eq!(cfg.default_model, "gpt-5.5");
         assert_eq!(cfg.default_effort, Effort::Medium);
         assert_eq!(cfg.web_backend, "exa");
+        assert_eq!(cfg.release_channel, ReleaseChannel::Stable);
     }
 
     #[test]
@@ -254,6 +281,7 @@ data_dir = "~/.saku-custom"
 default_model = "gpt-5.4-mini"
 default_effort = "high"
 web_backend = "other"
+release_channel = "nightly"
 "#;
         let cfg = Config::parse(text).expect("parse");
         assert_eq!(cfg.command_prefix, "bot");
@@ -262,6 +290,7 @@ web_backend = "other"
         assert_eq!(cfg.default_model, "gpt-5.4-mini");
         assert_eq!(cfg.default_effort, Effort::High);
         assert_eq!(cfg.web_backend, "other");
+        assert_eq!(cfg.release_channel, ReleaseChannel::Nightly);
     }
 
     #[test]
@@ -310,6 +339,7 @@ discord_token = "old"
 authorized_user_ids = ["1"]
 command_prefix = "bot"
 workspace = "/tmp/ws"
+release_channel = "nightly"
 "#,
         )
         .unwrap();
@@ -317,6 +347,7 @@ workspace = "/tmp/ws"
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("command_prefix"));
         assert!(text.contains("workspace"));
+        assert!(text.contains("release_channel = \"nightly\""));
         let cfg = Config::load(&path).expect("load");
         assert_eq!(cfg.discord_token, "new-tok");
         assert_eq!(cfg.authorized_user_ids, vec!["9"]);

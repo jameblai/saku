@@ -15,6 +15,7 @@ New installs need sensible defaults so Saku runs with minimal TOML editing.
 - Workspace default: bot user home directory
 - Data Dir: `~/.saku`
 - Web Backend default: `exa`
+- Release Channel default: `stable`
 
 ## Consequences
 

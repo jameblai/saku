@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Saku today installs only via `cargo install --git`, which compiles on the host — too heavy for underpowered machines (e.g. Raspberry Pi) and conflicts with the goal of a portable, lightweight agent. Issue #39 needs host-level **Install** (prebuilt binary + user systemd service), **Update** (`saku update`), and a release pipeline. **Setup** (Discord config + Login) stays separate but chains into interactive Install.
+Saku previously required compiling on the host — too heavy for underpowered machines (e.g. Raspberry Pi) and conflicting with the goal of a portable, lightweight agent. Issue #39 needs host-level **Install** (prebuilt binary + user systemd service), **Update** (`saku update`), and a release pipeline. **Setup** (Discord config + Login) stays separate but chains into interactive Install.
 
 We considered rolling `main` releases only, stable semver only (Starship-style), and t3code’s dual stable+nightly model. Pi iteration wants frequent bleeding-edge builds without forcing the maintainer to tag every change; stable tags remain intentional and low-anxiety.
 
@@ -27,4 +27,4 @@ We considered rolling `main` releases only, stable semver only (Starship-style),
 - New CI workflow for release builds (tag + nightly cron + dispatch); existing CI unchanged for PRs.
 - README **Get running** is operator-only: `install.sh` + **Setup** steps. `## Contributing` is a single link to `CONTRIBUTING.md`.
 - Add `CONTRIBUTING.md`: `git clone`, `cargo run -p saku`, `cargo build --release -p saku`, and CI-parity checks (`cargo test --workspace`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`); PR etiquette moved from README.
-- Do not document `cargo install --git` anywhere.
+- Do not document a source-install command anywhere.

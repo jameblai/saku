@@ -13,6 +13,7 @@ authorized_user_ids = ["YOUR_DISCORD_SNOWFLAKE"]
 # default_model = "gpt-5.5"
 # default_effort = "medium"
 # web_backend = "exa"
+# release_channel = "stable" # or "nightly"; used by `saku update`
 ```
 
 Re-auth: `saku login codex` (Provider) or `saku login exa` (Web Backend API key). Start the bot: `saku`.

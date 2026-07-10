@@ -44,6 +44,13 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::Update => match saku_cli::update().await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("saku update: {err}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Run { config } => run_bot_cmd(config).await,
     }
 }

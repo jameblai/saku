@@ -15,12 +15,15 @@ pub enum Command {
     LoginExa,
     /// Interactive Setup (config + Codex Login).
     Setup,
+    /// Replace the installed binary from the configured Release Channel.
+    Update,
 }
 
 #[derive(Debug, Parser)]
 #[command(
     name = "saku",
     about = "Saku Discord coding agent",
+    version = env!("SAKU_VERSION"),
     args_conflicts_with_subcommands = true
 )]
 struct Cli {
@@ -36,6 +39,8 @@ struct Cli {
 enum CliSubcommand {
     /// Interactive Setup: Discord config then Codex Login.
     Setup,
+    /// Update Saku from the configured Release Channel.
+    Update,
     /// Obtain and store a Provider or Web Backend Credential.
     Login {
         #[command(subcommand)]
@@ -66,6 +71,7 @@ where
     Ok(match cli.command {
         None => Command::Run { config: cli.config },
         Some(CliSubcommand::Setup) => Command::Setup,
+        Some(CliSubcommand::Update) => Command::Update,
         Some(CliSubcommand::Login { id: LoginId::Codex }) => Command::LoginCodex,
         Some(CliSubcommand::Login { id: LoginId::Exa }) => Command::LoginExa,
     })
@@ -108,6 +114,17 @@ mod tests {
     fn setup_subcommand() {
         let cmd = parse_args(["setup"]).expect("parse");
         assert_eq!(cmd, Command::Setup);
+    }
+
+    #[test]
+    fn update_subcommand() {
+        let cmd = parse_args(["update"]).expect("parse");
+        assert_eq!(cmd, Command::Update);
+    }
+
+    #[test]
+    fn update_rejects_channel_flag() {
+        assert!(parse_args(["update", "--channel", "nightly"]).is_err());
     }
 
     #[test]

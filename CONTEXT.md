@@ -67,8 +67,13 @@ _Avoid_: onboarding, install, init, first-run wizard (as product terms)
 
 
 **Tool**:
-A named capability the model may call during a Run. Core set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`. Web set: `web_search`, `web_extract` — registered only when a Credential exists for the configured Web Backend. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace; web Tools call that Web Backend. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
+A named capability the model may call during a Run. Core set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`, `bg_start`, `bg_list`, `bg_logs`, `bg_stop`. Web set: `web_search`, `web_extract` — registered only when a Credential exists for the configured Web Backend. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace; Background Process Tools manage Session-scoped long-running processes; web Tools call that Web Backend. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
 _Avoid_: function, action, skill
+
+
+**Background Process**:
+A Session-scoped OS process started by the agent via `bg_start` that outlives the Run that started it (e.g. an HTTP server). Starts in the Session Working Directory at call time (frozen for that process). Soft cap of 5 *running* per Session; output captured in an in-memory ~1 MiB ring buffer (drop oldest). Listed/logged/stopped via `bg_list` / `bg_logs` / `bg_stop` Tools and the `saku bg` Bot Command family. Not killed by Run end or `saku stop` (those remain Run-only). Authorised Users cannot *start* Background Processes via Bot Command — only inspect and stop them. In-memory for the bot process lifetime (not replayed from the Session Store).
+_Avoid_: job, daemon, service (as the domain term), bash (foreground tool)
 
 
 **Vision**:
@@ -94,7 +99,7 @@ _Avoid_: slash command (unless Discord slash commands are added later)
 
 
 **Bot Command**:
-A user message in a Session thread that starts with the Command Prefix and is handled by Saku rather than sent to the Harness as a normal prompt. v1: `stop`, `help`, `steer <message>`, `model`, `effort`, `status`.
+A user message in a Session thread that starts with the Command Prefix and is handled by Saku rather than sent to the Harness as a normal prompt. v1: `stop`, `help`, `steer <message>`, `model`, `effort`, `status`, `bg`, `bg logs <pid>`, `bg stop <pid>`, `bg stop all`.
 _Avoid_: slash command, reaction cancel (not used for cancel in v1)
 
 **Plan Usage**:

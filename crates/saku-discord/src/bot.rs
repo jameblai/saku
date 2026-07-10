@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use saku_harness::{
-    ALLOWED_MODELS, Config, Effort, Harness, RunEvent, UserTurn, file_tools, is_allowed_model,
-    is_supported_effort, search_tools, shell_tools, supported_efforts,
+    ALLOWED_MODELS, Config, Effort, Harness, RunEvent, UserTurn, background_tools, file_tools,
+    is_allowed_model, is_supported_effort, search_tools, shell_tools, supported_efforts,
 };
 use serenity::Client;
 use serenity::all::{
@@ -198,6 +198,11 @@ impl Handler {
                 format!("Effort set to `{effort}`")
             }
             BotCommand::Status => session.status_text().await,
+            BotCommand::BgList => session.bg_list_text().await,
+            BotCommand::BgLogs { pid } => {
+                session.bg_logs_text(pid, None).await.unwrap_or_else(|e| e)
+            }
+            BotCommand::BgStop { pid } => session.bg_stop(pid).await.unwrap_or_else(|e| e),
         };
 
         reply_chunks(ctx, msg.channel_id, msg, &reply).await?;
@@ -480,6 +485,9 @@ pub async fn register_default_tools(harness: &Harness) {
         harness.register_tool(tool).await;
     }
     for tool in shell_tools() {
+        harness.register_tool(tool).await;
+    }
+    for tool in background_tools() {
         harness.register_tool(tool).await;
     }
     for tool in search_tools(Arc::clone(harness.index())) {

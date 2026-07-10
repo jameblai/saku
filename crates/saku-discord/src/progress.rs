@@ -12,6 +12,7 @@ pub fn tool_emoji(name: &str) -> &'static str {
         "grep" => "🔎",
         "ls" => "📁",
         "cd" => "📂",
+        "bg_start" | "bg_list" | "bg_logs" | "bg_stop" => "🧵",
         _ => "🛠️",
     }
 }
@@ -63,7 +64,7 @@ fn discord_inline_code(content: &str) -> String {
 }
 
 pub fn format_progress(lines: &[(String, String)]) -> String {
-    let mut out = String::from("Tools:\n");
+    let mut out = String::new();
     for (name, preview) in lines {
         out.push_str(&format!("{} {name}: {preview}\n", tool_emoji(name)));
     }
@@ -87,7 +88,7 @@ fn trim_oldest_to_limit(text: &str, max: usize) -> String {
     }
     let mut lines: Vec<&str> = text.lines().collect();
     while lines.len() > 1 && lines.join("\n").chars().count() > max {
-        lines.remove(1);
+        lines.remove(0);
     }
     let joined = lines.join("\n");
     if joined.chars().count() > max {
@@ -112,7 +113,8 @@ mod tests {
             ("bash".into(), "`ls`".into()),
             ("read".into(), "`a.rs`".into()),
         ]);
-        assert!(text.contains("💻 bash:"));
+        assert!(!text.contains("Tools:"));
+        assert!(text.starts_with("💻 bash:"));
         assert!(text.contains("📖 read:"));
     }
 

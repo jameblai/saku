@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use tokio::sync::{Mutex, watch};
 
+use crate::background::BackgroundProcesses;
 use crate::config::{Config, Effort};
 use crate::credentials::CredentialStore;
 use crate::index::{SharedIndex, WorkspaceIndex};
@@ -20,6 +21,7 @@ pub(crate) struct LiveSession {
     pub state: Arc<Mutex<SessionState>>,
     pub abort_tx: Arc<Mutex<watch::Sender<bool>>>,
     pub run_control: Arc<Mutex<RunControl>>,
+    pub background: Arc<BackgroundProcesses>,
 }
 
 /// Shared Harness state.
@@ -138,6 +140,7 @@ impl Harness {
                 state: Arc::clone(&live.state),
                 abort_tx: Arc::clone(&live.abort_tx),
                 run_control: Arc::clone(&live.run_control),
+                background: Arc::clone(&live.background),
             });
         }
         let loaded = self.inner.store.load_or_create(
@@ -150,12 +153,14 @@ impl Harness {
         let (abort_tx, _) = watch::channel(false);
         let abort_tx = Arc::new(Mutex::new(abort_tx));
         let run_control = new_run_control();
+        let background = Arc::new(BackgroundProcesses::new());
         sessions.insert(
             thread_id.clone(),
             LiveSession {
                 state: Arc::clone(&state),
                 abort_tx: Arc::clone(&abort_tx),
                 run_control: Arc::clone(&run_control),
+                background: Arc::clone(&background),
             },
         );
         Ok(Session {
@@ -164,6 +169,7 @@ impl Harness {
             state,
             abort_tx,
             run_control,
+            background,
         })
     }
 }

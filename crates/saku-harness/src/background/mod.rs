@@ -314,6 +314,7 @@ fn spawn_background(command: &str, cwd: &Path) -> Result<Child, String> {
     cmd.arg("-lc")
         .arg(command)
         .current_dir(cwd)
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(false)

@@ -243,6 +243,88 @@ async fn bg_list_logs_stop_and_exited_code() {
     assert!(!process_alive(pid));
 }
 
+/// Remap this process's stdin to a pipe so inherited stdin is observably non-null.
+/// Restores the previous stdin fd on drop.
+///
+/// Holds [`STDIN_REMAP_LOCK`] for the remap lifetime so parallel tests do not observe
+/// a temporarily swapped stdin.
+struct RemapStdinToPipe {
+    saved_fd: i32,
+    write_end: i32,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+static STDIN_REMAP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+impl RemapStdinToPipe {
+    fn new() -> Self {
+        let lock = STDIN_REMAP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        unsafe {
+            let mut fds = [0i32; 2];
+            assert_eq!(libc::pipe(fds.as_mut_ptr()), 0, "pipe");
+            let saved = libc::dup(libc::STDIN_FILENO);
+            assert!(saved >= 0, "dup stdin");
+            assert_eq!(
+                libc::dup2(fds[0], libc::STDIN_FILENO),
+                0,
+                "dup2 pipe->stdin"
+            );
+            libc::close(fds[0]);
+            Self {
+                saved_fd: saved,
+                write_end: fds[1],
+                _lock: lock,
+            }
+        }
+    }
+}
+
+impl Drop for RemapStdinToPipe {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = libc::dup2(self.saved_fd, libc::STDIN_FILENO);
+            libc::close(self.saved_fd);
+            libc::close(self.write_end);
+        }
+    }
+}
+
+#[tokio::test]
+async fn bg_start_uses_null_stdin() {
+    // Without Stdio::null(), the child would inherit this pipe and fail the assertion.
+    let _stdin = RemapStdinToPipe::new();
+
+    let tmp = TempDir::new().unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    fake.push(ScriptedResponse::ToolCalls(vec![tool_call(
+        "1",
+        "bg_start",
+        json!({
+            "command": "bash -c 'echo STDIN:$(readlink /proc/self/fd/0); IFS= read -r _ || echo READ_EOF; sleep 30'",
+            "settle": 0.3
+        }),
+    )]));
+    fake.push_text("done");
+
+    let harness = harness_with_bg(fake, config(&tmp)).await;
+    let session = harness.session("bg-stdin").await.unwrap();
+    let _ = session.run(UserTurn::text("start")).await.collect().await;
+    let pid = parse_pid(&last_tool_text(&session.snapshot().await.messages));
+
+    let logs = wait_for_logs(&session, pid, "READ_EOF").await;
+    assert!(
+        logs.contains("STDIN:/dev/null"),
+        "Background Process stdin must be /dev/null (not inherited), got: {logs}"
+    );
+    assert!(
+        logs.contains("READ_EOF"),
+        "null stdin should yield EOF on read, got: {logs}"
+    );
+    assert!(process_alive(pid));
+
+    session.bg_stop(Some(pid)).await.unwrap();
+}
+
 #[tokio::test]
 async fn bg_stop_kills_process_group_children() {
     let tmp = TempDir::new().unwrap();

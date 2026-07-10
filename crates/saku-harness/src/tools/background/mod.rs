@@ -29,8 +29,9 @@ impl Tool for BgStartTool {
     fn description(&self) -> &str {
         "Start a Session-scoped Background Process that outlives the current Run \
          (e.g. an HTTP server). Starts in the Session Working Directory (frozen for \
-         this process). Optional settle seconds (default 2) before returning the \
-         process-group-leader PID and a short stdout/stderr snippet. Soft cap: 5 running."
+         this process). Stdin is /dev/null (not a TTY). Optional settle seconds \
+         (default 2) before returning the process-group-leader PID and a short \
+         stdout/stderr snippet. Soft cap: 5 running."
     }
 
     fn parameters_schema(&self) -> Value {

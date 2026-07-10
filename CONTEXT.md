@@ -33,7 +33,7 @@ One agent conversation bound to a single Discord thread. A channel @mention crea
 _Avoid_: conversation, chat, context (as the domain term for this binding)
 
 **Memory**:
-A file at `~/.saku/MEMORY.md` holding durable facts the agent should retain across Sessions — only explicitly requested memories or clearly important stable preferences/facts (e.g. rough location, tech stack, response style). Hard cap: 2,200 characters. Contents are included in every Run. File tools may always read/write this exact path even when it lies outside the Workspace; writes over the cap are rejected. Not a scrapbook of trivia.
+A file at `~/.saku/MEMORY.md` holding durable facts the agent should retain across Sessions — only explicitly requested memories or clearly important stable preferences/facts (e.g. rough location, tech stack, response style). Hard cap: 2,200 characters. Contents are included in every Run. Written only via the `memory` Tool (full replace; empty content clears). File tools cannot access this path. Not a scrapbook of trivia.
 _Avoid_: notes, journal, context file, AGENTS.md
 
 **Run**:
@@ -67,7 +67,7 @@ _Avoid_: onboarding, install, init, first-run wizard (as product terms)
 
 
 **Tool**:
-A named capability the model may call during a Run. Core set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`, `bg_start`, `bg_list`, `bg_logs`, `bg_stop`. Web set: `web_search`, `web_extract` — registered only when a Credential exists for the configured Web Backend. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace; Background Process Tools manage Session-scoped long-running processes; web Tools call that Web Backend. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
+A named capability the model may call during a Run. Core set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`, `memory`, `bg_start`, `bg_list`, `bg_logs`, `bg_stop`. Web set: `web_search`, `web_extract` — registered only when a Credential exists for the configured Web Backend. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace; `memory` full-replaces Memory; Background Process Tools manage Session-scoped long-running processes; web Tools call that Web Backend. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
 _Avoid_: function, action, skill
 
 

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{arg_string, maybe_enforce_memory_cap, ok_text, resolve_tool_path};
+use super::{arg_string, ok_text, resolve_tool_path};
 use crate::tools::{Tool, ToolContext, ToolError, ToolResult};
 
 pub struct WriteTool;
@@ -31,7 +31,7 @@ impl Tool for WriteTool {
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let path_arg = arg_string(&args, "path")?;
         let content = arg_string(&args, "content")?;
-        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, ctx.data_dir, &path_arg)?;
+        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, &path_arg)?;
         if path.exists() {
             ctx.session
                 .assert_fresh_snapshot(&path)
@@ -40,7 +40,6 @@ impl Tool for WriteTool {
         } else if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::Message(e.to_string()))?;
         }
-        maybe_enforce_memory_cap(&path, ctx.data_dir, &content)?;
         std::fs::write(&path, &content).map_err(|e| ToolError::Message(e.to_string()))?;
         ctx.session
             .record_read_snapshot(&path)

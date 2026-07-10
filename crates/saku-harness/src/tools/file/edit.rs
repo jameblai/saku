@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{arg_string, maybe_enforce_memory_cap, ok_text, resolve_tool_path};
+use super::{arg_string, ok_text, resolve_tool_path};
 use crate::tools::{Tool, ToolContext, ToolError, ToolResult};
 
 pub struct EditTool;
@@ -33,7 +33,7 @@ impl Tool for EditTool {
         let path_arg = arg_string(&args, "path")?;
         let old = arg_string(&args, "old_string")?;
         let new = arg_string(&args, "new_string")?;
-        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, ctx.data_dir, &path_arg)?;
+        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, &path_arg)?;
         if !path.exists() {
             return Ok(ToolResult::error(format!(
                 "file does not exist: {}",
@@ -56,7 +56,6 @@ impl Tool for EditTool {
             ));
         }
         let updated = content.replacen(&old, &new, 1);
-        maybe_enforce_memory_cap(&path, ctx.data_dir, &updated)?;
         std::fs::write(&path, &updated).map_err(|e| ToolError::Message(e.to_string()))?;
         ctx.session
             .record_read_snapshot(&path)

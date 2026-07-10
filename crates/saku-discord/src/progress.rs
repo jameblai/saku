@@ -31,7 +31,13 @@ pub fn args_preview(args: &Value) -> String {
         }
         other => other.to_string(),
     };
-    truncate_chars(&raw, 80)
+    // Truncate before escaping so a cut never splits a `\|` sequence.
+    escape_discord_pipes(&truncate_chars(&raw, 80))
+}
+
+/// Discord spoilers use `||…||`; bash `||` and regex `|` must not reach the client raw.
+fn escape_discord_pipes(s: &str) -> String {
+    s.replace('|', "\\|")
 }
 
 pub fn format_progress(lines: &[(String, String)]) -> String {
@@ -92,5 +98,20 @@ mod tests {
     fn args_preview_prefers_command_path_pattern() {
         assert_eq!(args_preview(&json!({"command": "pwd"})), "\"pwd\"");
         assert_eq!(args_preview(&json!({"path": "src"})), "\"src\"");
+    }
+
+    #[test]
+    fn args_preview_escapes_discord_spoiler_markers() {
+        let preview = args_preview(&json!({"command": "false || true"}));
+        assert_eq!(preview, r#""false \|\| true""#);
+        assert_eq!(
+            args_preview(&json!({"command": r#"pgrep -af "a|b""#})),
+            r#""pgrep -af "a\|b"""#
+        );
+        let body = format_progress(&[("bash".into(), preview)]);
+        assert!(
+            !body.contains("||"),
+            "Progress Message must not contain raw || (Discord spoiler syntax)"
+        );
     }
 }

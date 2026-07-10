@@ -35,7 +35,7 @@ Invite it to a server, @mention the bot, it opens a thread, and you get work don
 
 I like [pi](https://github.com/earendil-works/pi) at my desk — focused coding sessions, minimal and simple. On the go, or for background work, I want to chat with an agent that has its own *nix environment: coding and other tasks, without sitting in a terminal. pi isn’t packaged for that “personal assistant in my pocket” workflow.
 
-[Hermes](https://github.com/NousResearch/hermes-agent) was closer to that shape, but too heavy for what I needed. I was mostly using it as a Discord coding agent, and it shipped skills, connectors, and other platforms I didn’t need — Python, a long install, orders of magnitude more code than this.
+[Hermes](https://github.com/NousResearch/hermes-agent) was closer to that shape, but too heavy for what I needed. I was mostly using it as a Discord coding agent, and it shipped skills, connectors, and other platforms I didn’t need — Python, a long install, and about 500k lines of Python (excluding tests and web UI) against ~9k lines of Rust here.
 
 Saku is what I actually wanted: one binary, Discord as the UI, enough tools to get the job done.
 

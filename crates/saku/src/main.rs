@@ -1,14 +1,18 @@
 //! Saku binary entrypoint.
 //!
 //! `saku` runs the Discord bot; `saku setup` / `saku login` delegate to `saku-cli`.
+//! Bare `saku` auto-recovers via Setup or Login when needed (ADR-0017).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use saku::boot::{BootPlan, plan_boot};
 use saku::cli::{Command, parse_args};
 use saku_discord::run_bot;
-use saku_harness::{Config, CredentialStore, Harness, create_codex_provider};
+use saku_harness::{
+    CODEX_PROVIDER_ID, Config, CredentialStore, Harness, create_codex_provider,
+};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -46,10 +50,10 @@ async fn run_bot_cmd(config: Option<PathBuf>) -> ExitCode {
             .join(".saku/config.toml")
     });
 
-    let config = match Config::load(&config_path) {
+    let config = match ensure_ready(&config_path).await {
         Ok(c) => c,
         Err(err) => {
-            eprintln!("failed to load {}: {err}", config_path.display());
+            eprintln!("{err}");
             return ExitCode::FAILURE;
         }
     };
@@ -79,4 +83,39 @@ async fn run_bot_cmd(config: Option<PathBuf>) -> ExitCode {
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+/// Load config, auto-running Setup or Login when bare `saku` needs recovery.
+async fn ensure_ready(config_path: &Path) -> Result<Config, String> {
+    let loaded = Config::load(config_path);
+    let has_codex_credential = match &loaded {
+        Ok(cfg) => match CredentialStore::open(&cfg.data_dir) {
+            Ok(store) => store.read(CODEX_PROVIDER_ID).ok().flatten().is_some(),
+            Err(_) => false,
+        },
+        Err(_) => false,
+    };
+
+    match plan_boot(loaded.as_ref(), has_codex_credential) {
+        BootPlan::NeedsSetup => {
+            eprintln!(
+                "Config missing or invalid at {}; starting Setup…",
+                config_path.display()
+            );
+            saku_cli::setup(Some(config_path.to_path_buf()))
+                .await
+                .map_err(|e| format!("saku setup: {e}"))?;
+            Config::load(config_path).map_err(|e| {
+                format!("failed to load {} after Setup: {e}", config_path.display())
+            })
+        }
+        BootPlan::NeedsLogin => {
+            eprintln!("Codex Credential missing; starting Login…");
+            saku_cli::login_codex(Some(config_path.to_path_buf()))
+                .await
+                .map_err(|e| format!("saku login codex: {e}"))?;
+            loaded.map_err(|e| format!("failed to load {}: {e}", config_path.display()))
+        }
+        BootPlan::Ready => loaded.map_err(|e| format!("failed to load {}: {e}", config_path.display())),
+    }
 }

@@ -1,6 +1,6 @@
 # Example Saku config (`~/.saku/config.toml`)
 
-Prefer **`saku setup`** for first-run (prompts for Discord bot token + Authorised User ids, then Codex Login).
+Prefer **`saku setup`** for first-run (prompts for Discord bot token + Authorised User ids, then Codex Login). Bare **`saku`** also auto-enters Setup when config is missing/invalid, or Login when the Codex Credential is missing (ADR-0017).
 
 ```toml
 discord_token = "YOUR_BOT_TOKEN"

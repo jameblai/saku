@@ -17,6 +17,9 @@ pub const DEFAULT_MODEL: &str = "gpt-5.5";
 /// Default Effort for new Sessions.
 pub const DEFAULT_EFFORT: Effort = Effort::Medium;
 
+/// Default Web Backend id.
+pub const DEFAULT_WEB_BACKEND: &str = "exa";
+
 /// Reasoning / thinking level for a model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -69,6 +72,7 @@ struct RawConfig {
     data_dir: Option<String>,
     default_model: Option<String>,
     default_effort: Option<Effort>,
+    web_backend: Option<String>,
 }
 
 /// Resolved Saku configuration.
@@ -81,6 +85,7 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub default_model: String,
     pub default_effort: Effort,
+    pub web_backend: String,
 }
 
 impl Config {
@@ -124,6 +129,10 @@ impl Config {
                 .default_model
                 .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             default_effort: raw.default_effort.unwrap_or(DEFAULT_EFFORT),
+            web_backend: raw
+                .web_backend
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| DEFAULT_WEB_BACKEND.to_string()),
         })
     }
 
@@ -230,6 +239,7 @@ authorized_user_ids = ["111", "222"]
         assert_eq!(cfg.data_dir, home.join(".saku"));
         assert_eq!(cfg.default_model, "gpt-5.5");
         assert_eq!(cfg.default_effort, Effort::Medium);
+        assert_eq!(cfg.web_backend, "exa");
     }
 
     #[test]
@@ -243,6 +253,7 @@ workspace = "~/projects"
 data_dir = "~/.saku-custom"
 default_model = "gpt-5.4-mini"
 default_effort = "high"
+web_backend = "other"
 "#;
         let cfg = Config::parse(text).expect("parse");
         assert_eq!(cfg.command_prefix, "bot");
@@ -250,6 +261,7 @@ default_effort = "high"
         assert_eq!(cfg.data_dir, home.join(".saku-custom"));
         assert_eq!(cfg.default_model, "gpt-5.4-mini");
         assert_eq!(cfg.default_effort, Effort::High);
+        assert_eq!(cfg.web_backend, "other");
     }
 
     #[test]

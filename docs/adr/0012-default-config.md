@@ -14,6 +14,7 @@ New installs need sensible defaults so Saku runs with minimal TOML editing.
 - New Session defaults: model `gpt-5.5`, Effort `medium`
 - Workspace default: bot user home directory
 - Data Dir: `~/.saku`
+- Web Backend default: `exa`
 
 ## Consequences
 

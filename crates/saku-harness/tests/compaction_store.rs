@@ -89,6 +89,7 @@ async fn harness_session_survives_compaction_entry() {
             data_dir,
             default_model: "gpt-5.5".into(),
             default_effort: Effort::Medium,
+            web_backend: "exa".into(),
         },
         Arc::new(FakeProvider::new()),
     )

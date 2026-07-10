@@ -7,7 +7,7 @@ pub use setup::{parse_authorized_user_ids, setup};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use saku_harness::{Config, CredentialStore, DeviceCodeInfo, LoginNotify, login_device_code};
+use saku_harness::{Config, CredentialStore, DeviceCodeInfo, LoginNotify, login_device_code, login_exa_api_key};
 
 struct StdioNotify;
 
@@ -35,6 +35,24 @@ pub async fn login_codex(config_path: Option<PathBuf>) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     println!("Codex credentials saved to {}", store.path().display());
+    Ok(())
+}
+
+/// Run `saku login exa`: prompt for an API key (hidden) and store it.
+pub async fn login_exa(config_path: Option<PathBuf>) -> Result<(), String> {
+    let data_dir = resolve_data_dir(config_path)?;
+    let store = CredentialStore::open(&data_dir).map_err(|e| e.to_string())?;
+
+    print!("Exa API key: ");
+    let _ = io::stdout().flush();
+    let key = rpassword::read_password().map_err(|e| e.to_string())?;
+    let key = key.trim();
+    if key.is_empty() {
+        return Err("API key cannot be empty".into());
+    }
+
+    login_exa_api_key(&store, key).map_err(|e| e.to_string())?;
+    println!("Exa credentials saved to {}", store.path().display());
     Ok(())
 }
 

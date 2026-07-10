@@ -22,7 +22,7 @@ Saku needs clear crate and type boundaries so the Harness stays testable without
 ### Credentials
 
 - Path: `~/.saku/auth.json`
-- Schema inspired by pi: map of provider id → `{ "type": "oauth", access, refresh, expires, ... }` or `{ "type": "api_key", "key": "..." }`
+- Schema inspired by pi: map of id → `{ "type": "oauth", access, refresh, expires, ... }` or `{ "type": "api_key", "key": "..." }` (Provider or Web Backend)
 - File mode `0600`; refresh serialized with a file lock
 - Not required to be path-compatible with `~/.pi/agent/auth.json`
 
@@ -87,6 +87,7 @@ Optional with defaults:
 - `data_dir` = `"~/.saku"`
 - `default_model` = `"gpt-5.5"`
 - `default_effort` = `"medium"`
+- `web_backend` = `"exa"`
 
 Tuning knobs (compaction thresholds, image max dimension, etc.) stay code defaults until needed.
 

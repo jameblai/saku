@@ -24,6 +24,7 @@ fn config(tmp: &TempDir) -> Config {
         data_dir,
         default_model: "gpt-5.5".into(),
         default_effort: Effort::Medium,
+        web_backend: "exa".into(),
     }
 }
 
@@ -77,6 +78,7 @@ async fn cd_and_bash_use_working_directory() {
             data_dir: cfg.data_dir.clone(),
             default_model: "gpt-5.5".into(),
             default_effort: Effort::Medium,
+            web_backend: "exa".into(),
         },
         Arc::new(FakeProvider::new()),
     )

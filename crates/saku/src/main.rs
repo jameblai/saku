@@ -37,6 +37,13 @@ async fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::LoginExa => match saku_cli::login_exa(None).await {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("saku login exa: {err}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Run { config } => run_bot_cmd(config).await,
     }
 }

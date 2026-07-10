@@ -12,6 +12,7 @@ authorized_user_ids = ["YOUR_DISCORD_SNOWFLAKE"]
 # data_dir = "~/.saku"
 # default_model = "gpt-5.5"
 # default_effort = "medium"
+# web_backend = "exa"
 ```
 
-Re-auth only: `saku login codex`. Start the bot: `saku`.
+Re-auth: `saku login codex` (Provider) or `saku login exa` (Web Backend API key). Start the bot: `saku`.

@@ -28,6 +28,7 @@ pub(crate) struct HarnessInner {
     pub data_dir: PathBuf,
     pub default_model: String,
     pub default_effort: Effort,
+    pub web_backend: String,
     pub provider: Arc<dyn Provider>,
     pub store: SessionStore,
     pub credentials: CredentialStore,
@@ -75,6 +76,7 @@ impl Harness {
                 data_dir: config.data_dir,
                 default_model: config.default_model,
                 default_effort: config.default_effort,
+                web_backend: config.web_backend,
                 provider,
                 store,
                 credentials,
@@ -107,6 +109,10 @@ impl Harness {
 
     pub fn default_effort(&self) -> Effort {
         self.inner.default_effort
+    }
+
+    pub fn web_backend(&self) -> &str {
+        &self.inner.web_backend
     }
 
     /// Live Codex Plan Usage + Reset Credits (best-effort; errors are for the caller).

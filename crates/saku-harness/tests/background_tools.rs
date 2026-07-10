@@ -68,7 +68,7 @@ fn process_alive(pid: u32) -> bool {
 }
 
 async fn wait_for_logs(session: &saku_harness::Session, pid: u32, needle: &str) -> String {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let logs = session.bg_logs_text(pid, Some(50)).await.unwrap();
         if logs.contains(needle) {
@@ -77,12 +77,14 @@ async fn wait_for_logs(session: &saku_harness::Session, pid: u32, needle: &str) 
         if tokio::time::Instant::now() >= deadline {
             return logs;
         }
+        tokio::task::yield_now().await;
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
 
 #[tokio::test]
 async fn bg_start_returns_pid_and_survives_run() {
+    let _lock = bg_test_lock().await;
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
     fake.push(ScriptedResponse::ToolCalls(vec![tool_call(
@@ -116,6 +118,7 @@ async fn bg_start_returns_pid_and_survives_run() {
 
 #[tokio::test]
 async fn bg_start_enforces_running_cap_of_five() {
+    let _lock = bg_test_lock().await;
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
     for i in 1..=5 {
@@ -153,6 +156,7 @@ async fn bg_start_enforces_running_cap_of_five() {
 
 #[tokio::test]
 async fn session_stop_does_not_kill_background_process() {
+    let _lock = bg_test_lock().await;
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
     fake.push(ScriptedResponse::ToolCalls(vec![tool_call(
@@ -198,6 +202,7 @@ async fn session_stop_does_not_kill_background_process() {
 
 #[tokio::test]
 async fn bg_list_logs_stop_and_exited_code() {
+    let _lock = bg_test_lock().await;
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
     fake.push(ScriptedResponse::ToolCalls(vec![tool_call(
@@ -255,6 +260,13 @@ struct RemapStdinToPipe {
 }
 
 static STDIN_REMAP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Serialize integration tests that spawn real Background Processes so CI
+/// runners do not starve their stdout reader tasks under full-suite load.
+static BG_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn bg_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
+    BG_TEST_LOCK.lock().await
+}
 
 impl RemapStdinToPipe {
     fn new() -> Self {
@@ -291,6 +303,7 @@ impl Drop for RemapStdinToPipe {
 
 #[tokio::test]
 async fn bg_start_uses_null_stdin() {
+    let _lock = bg_test_lock().await;
     // Without Stdio::null(), the child would inherit this pipe and fail the assertion.
     let _stdin = RemapStdinToPipe::new();
 
@@ -327,6 +340,7 @@ async fn bg_start_uses_null_stdin() {
 
 #[tokio::test]
 async fn bg_stop_kills_process_group_children() {
+    let _lock = bg_test_lock().await;
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
     fake.push(ScriptedResponse::ToolCalls(vec![tool_call(
@@ -368,6 +382,7 @@ async fn bg_stop_kills_process_group_children() {
 
 #[tokio::test]
 async fn bg_list_logs_stop_tools_work_in_runs() {
+    let _lock = bg_test_lock().await;
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
     fake.push(ScriptedResponse::ToolCalls(vec![tool_call(

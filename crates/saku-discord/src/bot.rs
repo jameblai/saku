@@ -8,7 +8,8 @@ use saku_harness::{
 };
 use serenity::Client;
 use serenity::all::{
-    ChannelId, Context, CreateMessage, EventHandler, GatewayIntents, Message, ReactionType,
+    ChannelId, Context, CreateMessage, EventHandler, GatewayIntents, Message, MessageReference,
+    ReactionType,
 };
 use serenity::async_trait;
 use tokio::sync::Mutex;
@@ -78,7 +79,7 @@ impl EventHandler for Handler {
         let content_for_cmd = strip_mention(&msg.content, bot_id);
         if let Some(cmd) = parse_command(&self.config.command_prefix, &content_for_cmd) {
             if let Err(err) = self.handle_command(&ctx, &msg, cmd).await {
-                let _ = reply_chunks(&ctx, &msg, &format!("Error: {err}")).await;
+                let _ = reply_chunks(&ctx, msg.channel_id, &msg, &format!("Error: {err}")).await;
             }
             return;
         }
@@ -100,17 +101,19 @@ impl EventHandler for Handler {
             return;
         }
 
-        let (thread_id, _channel_id) = if mentioned && !in_thread {
+        let session_thread = if mentioned && !in_thread {
             match ensure_session_thread(&ctx, &msg).await {
-                Ok(id) => (id.to_string(), id),
+                Ok(id) => id,
                 Err(err) => {
                     error!("failed to create thread: {err}");
                     return;
                 }
             }
         } else {
-            (msg.channel_id.to_string(), msg.channel_id)
+            msg.channel_id
         };
+        let thread_id = session_thread.to_string();
+        let output_channel = run_output_channel(msg.channel_id, session_thread);
 
         let text = strip_mention(&msg.content, bot_id).trim().to_string();
         let images = download_attachments(&ctx, &msg).await;
@@ -119,7 +122,10 @@ impl EventHandler for Handler {
         }
 
         let turn = UserTurn { text, images };
-        if let Err(err) = self.run_turn(&ctx, &msg, &thread_id, turn).await {
+        if let Err(err) = self
+            .run_turn(&ctx, &msg, &thread_id, output_channel, turn)
+            .await
+        {
             error!("run error: {err}");
         }
     }
@@ -192,7 +198,7 @@ impl Handler {
             }
         };
 
-        reply_chunks(ctx, msg, &reply).await?;
+        reply_chunks(ctx, msg.channel_id, msg, &reply).await?;
         react_ok(ctx, msg).await;
         Ok(())
     }
@@ -202,6 +208,7 @@ impl Handler {
         ctx: &Context,
         msg: &Message,
         thread_id: &str,
+        output_channel: ChannelId,
         turn: UserTurn,
     ) -> Result<(), String> {
         let session = self
@@ -249,12 +256,8 @@ impl Handler {
                             .edit(ctx, serenity::all::EditMessage::new().content(body))
                             .await;
                     } else {
-                        match msg
-                            .channel_id
-                            .send_message(
-                                ctx,
-                                CreateMessage::new().content(body).reference_message(msg),
-                            )
+                        match output_channel
+                            .send_message(ctx, build_reply(body, output_channel, msg))
                             .await
                         {
                             Ok(m) => progress_msg = Some(m),
@@ -292,14 +295,14 @@ impl Handler {
             } else {
                 fail_note
             };
-            reply_chunks(ctx, msg, &note).await?;
+            reply_chunks(ctx, output_channel, msg, &note).await?;
             return Ok(());
         }
 
         if answer.trim().is_empty() {
             answer = "(no assistant text)".into();
         }
-        reply_chunks(ctx, msg, &answer).await?;
+        reply_chunks(ctx, output_channel, msg, &answer).await?;
         react_ok(ctx, msg).await;
         Ok(())
     }
@@ -331,6 +334,20 @@ async fn ensure_session_thread(ctx: &Context, msg: &Message) -> Result<ChannelId
     Ok(thread.id)
 }
 
+/// Channel that receives Progress/Answer messages for a Session Run.
+///
+/// A channel @mention creates a Session thread while the triggering message
+/// stays in the parent channel. Bot output must go to the Session thread.
+fn run_output_channel(_trigger_channel: ChannelId, session_thread: ChannelId) -> ChannelId {
+    session_thread
+}
+
+/// Reply reference that still posts if Discord rejects a cross-channel link
+/// (parent-channel starter message → Session thread).
+fn reply_reference(msg: &Message) -> MessageReference {
+    MessageReference::from(msg).fail_if_not_exists(false)
+}
+
 fn strip_mention(content: &str, bot_id: serenity::all::UserId) -> String {
     content
         .replace(&format!("<@{bot_id}>"), "")
@@ -354,17 +371,71 @@ fn strip_mention_raw(content: &str) -> String {
     out
 }
 
-async fn reply_chunks(ctx: &Context, msg: &Message, text: &str) -> Result<(), String> {
+/// Whether Discord allows a reply-reference from `output_channel` to the
+/// triggering message in `trigger_channel`.
+///
+/// A channel @mention creates a Session thread while the trigger stays in the
+/// parent channel. Cross-channel `message_reference` fails the send (the Run
+/// answer is stored but never appears in Discord). Same-channel references
+/// (follow-ups already in the thread) are fine.
+fn can_reference_trigger(output_channel: ChannelId, trigger_channel: ChannelId) -> bool {
+    output_channel == trigger_channel
+}
+
+fn build_reply(content: impl Into<String>, output_channel: ChannelId, trigger: &Message) -> CreateMessage {
+    let mut message = CreateMessage::new().content(content);
+    if can_reference_trigger(output_channel, trigger.channel_id) {
+        message = message.reference_message(reply_reference(trigger));
+    }
+    message
+}
+
+async fn reply_chunks(
+    ctx: &Context,
+    channel_id: ChannelId,
+    msg: &Message,
+    text: &str,
+) -> Result<(), String> {
     for chunk in chunk_message(text) {
-        msg.channel_id
-            .send_message(
-                ctx,
-                CreateMessage::new().content(chunk).reference_message(msg),
-            )
+        channel_id
+            .send_message(ctx, build_reply(chunk, channel_id, msg))
             .await
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_mention_output_goes_to_session_thread_not_parent() {
+        let parent = ChannelId::new(111);
+        let thread = ChannelId::new(222);
+        assert_ne!(parent, thread);
+        assert_eq!(run_output_channel(parent, thread), thread);
+    }
+
+    #[test]
+    fn in_thread_output_stays_on_same_channel() {
+        let thread = ChannelId::new(333);
+        assert_eq!(run_output_channel(thread, thread), thread);
+    }
+
+    #[test]
+    fn new_thread_reply_does_not_reference_parent_channel_message() {
+        let parent = ChannelId::new(111);
+        let thread = ChannelId::new(222);
+        // Repro: first @mention Run posts to the new thread but referenced the
+        // parent-channel starter message → Discord rejected the send, so the
+        // answer never appeared (follow-ups in-thread worked).
+        assert!(
+            !can_reference_trigger(thread, parent),
+            "must not cross-reference parent message when posting into new thread"
+        );
+        assert!(can_reference_trigger(thread, thread));
+    }
 }
 
 async fn react_ok(ctx: &Context, msg: &Message) {

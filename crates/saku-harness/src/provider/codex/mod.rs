@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::credentials::CredentialStore;
 use crate::provider::{Provider, ProviderError, ProviderStream};
-use crate::types::{ContentPart, ProviderEvent, Request, Role, ToolCall, ToolDefinition};
+use crate::types::{ContentPart, ProviderEvent, Request, Role, ToolDefinition};
 
 pub use login::{DeviceCodeInfo, LoginError, LoginNotify, login_device_code};
 use login::{chatgpt_account_id, ensure_fresh_access};
@@ -261,11 +261,13 @@ fn build_request_body(request: &Request) -> Value {
                 }));
             }
             Role::Assistant => {
-                if !msg.content.is_empty() {
+                let content = content_parts_to_output(&msg.content);
+                if !content.is_empty() {
                     input.push(json!({
                         "type": "message",
                         "role": "assistant",
-                        "content": content_parts_to_input(&msg.content),
+                        "status": "completed",
+                        "content": content,
                     }));
                 }
                 for call in &msg.tool_calls {
@@ -338,6 +340,22 @@ fn content_parts_to_input(parts: &[ContentPart]) -> Vec<Value> {
         .collect()
 }
 
+/// Assistant message content for the Responses API (output items, not input).
+fn content_parts_to_output(parts: &[ContentPart]) -> Vec<Value> {
+    parts
+        .iter()
+        .filter_map(|p| match p {
+            ContentPart::Text { text } => Some(json!({
+                "type": "output_text",
+                "text": text,
+                "annotations": [],
+            })),
+            // Assistant turns do not replay images as output parts.
+            ContentPart::Image { .. } => None,
+        })
+        .collect()
+}
+
 fn tool_def_to_codex(tool: &ToolDefinition) -> Value {
     json!({
         "type": "function",
@@ -347,17 +365,61 @@ fn tool_def_to_codex(tool: &ToolDefinition) -> Value {
     })
 }
 
-/// Helper for tests constructing tool calls without importing types twice.
-#[allow(dead_code)]
-pub fn _unused_tool_call() -> ToolCall {
-    ToolCall {
-        id: String::new(),
-        name: String::new(),
-        arguments: json!({}),
-    }
-}
-
 /// Shared constructor used by the binary.
 pub fn create_codex_provider(store: CredentialStore) -> Arc<dyn Provider> {
     Arc::new(CodexProvider::new(store))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Effort;
+    use crate::types::Message;
+
+    fn sample_request(messages: Vec<Message>) -> Request {
+        Request {
+            system: "sys".into(),
+            messages,
+            tools: Vec::new(),
+            model: "gpt-5.5".into(),
+            effort: Effort::Medium,
+        }
+    }
+
+    #[test]
+    fn follow_up_assistant_history_uses_output_text_not_input_text() {
+        // Repro: after a successful first turn, the next Run replays the assistant
+        // message. Codex rejects assistant content typed as input_text (400:
+        // "Supported values are: 'output_text' and 'refusal'").
+        let body = build_request_body(&sample_request(vec![
+            Message::user_text("whats up"),
+            Message::assistant_text("Hey!"),
+            Message::user_text("Hello?"),
+        ]));
+        let input = body["input"].as_array().expect("input array");
+        assert_eq!(input.len(), 3);
+
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+
+        assert_eq!(input[1]["role"], "assistant");
+        assert_eq!(
+            input[1]["content"][0]["type"],
+            "output_text",
+            "assistant history must use output_text (got {:?})",
+            input[1]["content"][0]["type"]
+        );
+        assert_ne!(input[1]["content"][0]["type"], "input_text");
+
+        assert_eq!(input[2]["role"], "user");
+        assert_eq!(input[2]["content"][0]["type"], "input_text");
+    }
+
+    #[test]
+    fn user_only_turn_still_uses_input_text() {
+        let body = build_request_body(&sample_request(vec![Message::user_text("hi")]));
+        let input = body["input"].as_array().expect("input array");
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+    }
 }

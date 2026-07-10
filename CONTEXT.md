@@ -62,12 +62,16 @@ A host CLI flow (`saku login <id>`) that obtains and stores a Credential for a P
 _Avoid_: /login, sign-in (as product UI inside Discord)
 
 **Install**:
-Host-level delivery of the `saku` binary onto the machine (e.g. `curl … | bash` or `saku update`) and registration of a user-level host service so the bot survives logout. Does not itself write the Data Dir or perform Login — a typical interactive Install chains into Setup before enabling the service; non-interactive Install delivers only the binary.
+Host-level delivery of the `saku` binary onto the machine (e.g. `curl … | bash` or `saku update`). Does not write the Data Dir or perform Login. A typical interactive Install chains into **Setup**, then installs a **Host Service** unit; turning it on is a separate operator choice via `saku service enable`. Non-interactive Install delivers only the binary.
 _Avoid_: Setup, onboarding, deploy (as the product term)
 
 **Update**:
-Host CLI flow (`saku update`) that replaces the installed `saku` binary from the chosen Release Channel and restarts the host service if it is running.
+Host CLI flow (`saku update`) that replaces the installed `saku` binary from the chosen Release Channel and restarts the **Host Service** if it is active. Unit file changes require `saku service install`, not Update.
 _Avoid_: upgrade (alone), reinstall
+
+**Host Service**:
+The user-level systemd unit that keeps the `saku` binary running across logout; managed via `saku service` commands (`install`, `uninstall`, `enable`, `disable`). `install` writes the unit and enables linger; `enable` turns on persistence and starts the service now; `disable` stops it and turns off persistence. Bare `saku service` reports status.
+_Avoid_: service (alone), daemon, Background Process
 
 **Release Channel**:
 Which published binary line Install or Update resolves — **stable** (semver-tagged releases, GitHub `latest`) or **nightly** (automated prereleases from `main`). Persisted in `config.toml` (default `stable`); `saku update` follows it. Changed only by editing config, not a CLI flag.

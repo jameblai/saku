@@ -8,6 +8,7 @@ use tokio::sync::{Mutex, watch};
 
 use crate::config::{Config, Effort};
 use crate::credentials::CredentialStore;
+use crate::index::{SharedIndex, WorkspaceIndex};
 use crate::provider::Provider;
 use crate::session::{Session, SessionState, SessionStore, StoreError};
 use crate::tools::{Tool, ToolContext, ToolError, ToolRegistry, ToolResult};
@@ -27,6 +28,7 @@ pub(crate) struct HarnessInner {
     pub provider: Arc<dyn Provider>,
     pub store: SessionStore,
     pub credentials: CredentialStore,
+    pub index: SharedIndex,
     pub tools: Mutex<ToolRegistry>,
     pub sessions: Mutex<HashMap<String, LiveSession>>,
 }
@@ -63,6 +65,7 @@ impl Harness {
     pub fn new(config: Config, provider: Arc<dyn Provider>) -> Result<Self, HarnessError> {
         let store = SessionStore::open(&config.data_dir)?;
         let credentials = CredentialStore::open(&config.data_dir)?;
+        let index = Arc::new(WorkspaceIndex::new(&config.workspace, &config.data_dir)?);
         Ok(Self {
             inner: Arc::new(HarnessInner {
                 workspace: config.workspace,
@@ -72,10 +75,15 @@ impl Harness {
                 provider,
                 store,
                 credentials,
+                index,
                 tools: Mutex::new(ToolRegistry::new()),
                 sessions: Mutex::new(HashMap::new()),
             }),
         })
+    }
+
+    pub fn index(&self) -> &SharedIndex {
+        &self.inner.index
     }
 
     pub fn workspace(&self) -> &std::path::Path {
@@ -137,4 +145,6 @@ pub enum HarnessError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Credentials(#[from] crate::credentials::CredentialError),
+    #[error(transparent)]
+    Index(#[from] crate::index::IndexError),
 }

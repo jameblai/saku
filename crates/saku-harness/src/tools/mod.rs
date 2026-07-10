@@ -1,6 +1,7 @@
 //! Tool trait and registry.
 
 pub mod file;
+pub mod search;
 pub mod shell;
 
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use crate::session::Session;
 use crate::types::{ContentPart, ToolDefinition};
 
 pub use file::{EditTool, ReadTool, WriteTool, file_tools};
+pub use search::{FindTool, GrepTool, LsTool, search_tools};
 pub use shell::{BashTool, CdTool, shell_tools};
 
 #[derive(Debug, Error)]

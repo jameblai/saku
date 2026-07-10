@@ -4,12 +4,13 @@ use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use flate2::read::GzDecoder;
 use saku_harness::{Config, ReleaseChannel};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+
+use crate::service;
 
 const RELEASES_URL: &str = "https://api.github.com/repos/jameblai/saku/releases?per_page=100";
 const LATEST_STABLE_URL: &str = "https://api.github.com/repos/jameblai/saku/releases/latest";
@@ -165,7 +166,7 @@ async fn update_from_channel(channel: ReleaseChannel, destination: &Path) -> Res
     verify_checksum(&target.asset_name, &archive, &sums)?;
     replace_binary_from_archive(&archive, destination)?;
     println!("Updated Saku to {} ({channel}).", target.tag);
-    restart_service_if_active();
+    service::restart_service_if_active();
     Ok(())
 }
 
@@ -227,22 +228,6 @@ fn replace_binary_from_archive(archive: &[u8], destination: &Path) -> Result<(),
         .map_err(|e| e.to_string())?;
     temp.persist(destination).map_err(|e| e.error.to_string())?;
     Ok(())
-}
-
-fn restart_service_if_active() {
-    let active = Command::new("systemctl")
-        .args(["--user", "is-active", "--quiet", "saku.service"])
-        .status()
-        .is_ok_and(|status| status.success());
-    if active {
-        match Command::new("systemctl")
-            .args(["--user", "restart", "saku.service"])
-            .status()
-        {
-            Ok(status) if status.success() => println!("Restarted saku.service."),
-            _ => eprintln!("warning: failed to restart saku.service"),
-        }
-    }
 }
 
 #[cfg(test)]

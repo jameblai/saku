@@ -92,20 +92,5 @@ if [[ "$interactive" == false ]]; then
 fi
 
 "$HOME/.local/bin/saku" setup < /dev/tty
-unit_dir="$HOME/.config/systemd/user"
-mkdir -p "$unit_dir"
-cat > "$unit_dir/saku.service" <<EOF
-[Unit]
-Description=Saku Discord coding agent
-
-[Service]
-ExecStart=$HOME/.local/bin/saku
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-EOF
-loginctl enable-linger "$USER"
-systemctl --user daemon-reload
-systemctl --user enable --now saku.service
-echo "Installed Saku $tag and started saku.service."
+"$HOME/.local/bin/saku" service install
+echo "Installed Saku $tag."

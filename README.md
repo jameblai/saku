@@ -19,8 +19,6 @@
 cargo install --git https://github.com/jameblai/saku
 ```
 
-A curl installer will come once releases are ready.
-
 ## Setup
 
 1. Create a bot in the [Discord Developer Portal](https://discord.com/developers/applications)
@@ -35,7 +33,11 @@ A coding agent you talk to in Discord threads.
 
 Invite it to a server, @mention the bot, it opens a thread, and you get work done.
 
-I wanted something lighter than [Hermes](https://github.com/NousResearch/hermes-agent). I was mostly using it as a Discord coding agent, but it shipped skills, connectors, and other platforms I didn’t need — Python, a long install, orders of magnitude more code than this. [pi](https://github.com/earendil-works/pi) pointed at the minimal agent loop. Saku is the cut-down version I actually wanted: one binary, Discord as the UI, enough tools to get the job done.
+I like [pi](https://github.com/earendil-works/pi) at my desk — focused coding sessions, minimal and simple. On the go, or for background work, I want to chat with an agent that has its own *nix environment: coding and other tasks, without sitting in a terminal. pi isn’t packaged for that “personal assistant in my pocket” workflow.
+
+[Hermes](https://github.com/NousResearch/hermes-agent) was closer to that shape, but too heavy for what I needed. I was mostly using it as a Discord coding agent, and it shipped skills, connectors, and other platforms I didn’t need — Python, a long install, orders of magnitude more code than this.
+
+Saku is what I actually wanted: one binary, Discord as the UI, enough tools to get the job done.
 
 Discord’s threading is ideal for agents — work and context stay in one place. Better than Telegram (buggy), Slack (too corporate), and the rest that don’t really do threads.
 
@@ -44,7 +46,7 @@ Discord’s threading is ideal for agents — work and context stay in one place
 - `read` / `edit` / `write` / `bash` — enough to work a codebase
 - Web search & extract via Exa
 - Basic memory across sessions
-- Fast file search (fff)
+- Fast file search ([fff](https://github.com/dmtrKovalenko/fff))
 - A minimal system prompt
 - No permission popups
 

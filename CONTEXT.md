@@ -41,6 +41,10 @@ One invocation of the Harness for a user message (or queued follow-up) until the
 _Avoid_: job, task, turn (turn = one LLM call inside a Run)
 
 
+**Subagent**:
+An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own mini-transcript (task string only — no parent history), inherits Project Context / Memory / Skills, and returns a summary to the parent. Modes: `explore` (read-only tools, default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
+_Avoid_: Session, Background Process, delegate (as the tool name)
+
 
 **Provider**:
 A pluggable LLM backend identity (e.g. Codex subscription, a future Anthropic subscription, or an API-key vendor). Credentials and request auth are resolved per Provider. At the code boundary, a Provider streams completion events from a harness `Request` (transcript + tools + model + Effort).
@@ -83,8 +87,13 @@ _Avoid_: onboarding, install, init, first-run wizard (as product terms)
 
 
 **Tool**:
-A named capability the model may call during a Run. Core set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`, `memory`, `bg_start`, `bg_list`, `bg_logs`, `bg_stop`. Web set: `web_search`, `web_extract` — registered only when a Credential exists for the configured Web Backend. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace; `memory` full-replaces Memory; Background Process Tools manage Session-scoped long-running processes; web Tools call that Web Backend. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
+A named capability the model may call during a Run. Core set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`, `memory`, `bg_start`, `bg_list`, `bg_logs`, `bg_stop`, `session_search`, `subagent`. Web set: `web_search`, `web_extract` — registered only when a Credential exists for the configured Web Backend. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace; `memory` full-replaces Memory; Background Process Tools manage Session-scoped long-running processes; `session_search` queries the Session Search FTS index; `subagent` runs an isolated inner agent loop; web Tools call that Web Backend. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
 _Avoid_: function, action, skill
+
+
+**Skill**:
+An Agent Skills standard capability package (`SKILL.md` plus optional scripts and references) that Saku discovers and loads on demand. Each Run injects available skill names and descriptions into the System Prompt; the model loads full instructions via `read`, or the user forces a skill with `$skill-name` in their message. Global skills live under `~/.agents/skills/`; project skills under `.agents/skills/` in the Session Working Directory and its ancestors up to the Workspace root.
+_Avoid_: Tool, extension, prompt template, MCP
 
 
 **Background Process**:
@@ -109,13 +118,18 @@ On-disk persistence under the Data Dir of a Session’s transcript, Read Snapsho
 _Avoid_: database, cache, memory (for this durable store), JSONC
 
 
+**Session Search**:
+Cross-Session full-text search over past conversation text, backed by a SQLite FTS index under the Data Dir. The agent invokes it via a `session_search` Tool; returns ranked snippets (thread id, date, role, excerpt) from user/assistant text and compaction summaries across all Sessions.
+_Avoid_: Memory, find/grep (Workspace files), session replay
+
+
 **Command Prefix**:
 A configurable string from `~/.saku/config.toml` that introduces Bot Commands (default `saku` → `saku stop`, `saku model gpt-5.5`). Parsed as the prefix token plus whitespace before the subcommand.
 _Avoid_: slash command (unless Discord slash commands are added later)
 
 
 **Bot Command**:
-A user message in a Session thread that starts with the Command Prefix and is handled by Saku rather than sent to the Harness as a normal prompt. v1: `stop`, `help`, `steer <message>`, `model`, `effort`, `status`, `bg`, `bg logs <pid>`, `bg stop <pid>`, `bg stop all`.
+A user message in a Session thread that starts with the Command Prefix and is handled by Saku rather than sent to the Harness as a normal prompt. v1: `stop`, `help`, `steer <message>`, `model`, `effort`, `status`, `goal`, `goal <condition>`, `bg`, `bg logs <pid>`, `bg stop <pid>`, `bg stop all`.
 _Avoid_: slash command, reaction cancel (not used for cancel in v1)
 
 **Plan Usage**:
@@ -129,6 +143,17 @@ _Avoid_: reset bank token, usage voucher
 **Steer**:
 A Bot Command that injects a mid-Run user directive into the active Session; applied after the current tool batch finishes (does not start a second parallel Run in that Session).
 _Avoid_: interrupt, follow-up (follow-up is a normal post-Run message)
+
+
+**Goal**:
+A Session-scoped completion condition set via `saku goal <condition>`. While active, the Harness chains Runs until a Goal Evaluator judges the condition met or `max_runs` (20, fixed in v1) is exhausted. Persisted in the Session Store and resumes after bot restart. Cleared on achievement or `saku stop` (which also aborts the active Run and clears the queue). Replaced when a new `saku goal` is issued.
+_Avoid_: Run, cron, steer, task
+
+
+**Goal Evaluator**:
+A short Harness invocation after each working Run on `gpt-5.4-mini` at low Effort. Reads the full Session transcript and returns a structured `goal_check` verdict (`met` + `reason`). Drives whether the outer Goal loop continues.
+_Avoid_: compaction, steer, subagent
+
 
 **Progress Message**:
 A Discord reply to the user’s triggering message that lists Tool calls as they happen (emoji + tool name + short args preview). Edited in place during the Run; left in the thread afterward.
@@ -147,8 +172,12 @@ A pi-style reduction of a Session transcript: older turns are summarized into a 
 _Avoid_: truncate, summarize (alone), prune
 
 **System Prompt**:
-The fixed Harness instructions sent each Run (identity, Workspace/cwd, tool norms), always combined with injected Memory. Wording is minimal and iterated in code.
-_Avoid_: persona doc, AGENTS.md
+The fixed Harness instructions sent each Run (identity, Workspace/cwd, tool norms), always combined with injected Memory and **Project Context**. Wording is minimal and iterated in code.
+_Avoid_: persona doc, AGENTS.md (as the domain term — use Project Context)
+
+**Project Context**:
+Repository and personal norms from discovered `AGENTS.md` files, fully injected into the System Prompt each Run. Loaded from `~/.agents/AGENTS.md` (if present) plus every `AGENTS.md` in the Session Working Directory and its ancestors up to the Workspace root, ordered global first then root→cwd.
+_Avoid_: Memory, Skill, context file (generic)
 
 **Effort**:
 The reasoning/thinking level sent to the current model (pi’s thinking levels: e.g. `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` where the model supports it). Available values depend on the selected model. Chosen per Session; new Sessions take model/Effort defaults from `config.toml`.

@@ -160,7 +160,10 @@ impl Session {
 
     /// Abort the active Run and drain the Session Run Queue.
     pub async fn stop(&self) {
-        let _ = self.abort_tx.lock().await.send(true);
+        // `send_replace` (not `send`): abort receivers only exist while a tool is
+        // executing. `watch::Sender::send` no-ops with zero receivers, which left
+        // the flag stuck true after stop and made every follow-up Run abort.
+        let _ = self.abort_tx.lock().await.send_replace(true);
         let mut control = self.run_control.lock().await;
         while let Some(queued) = control.queue.pop_front() {
             let _ = queued.tx.send(RunEvent::RunAborted);
@@ -212,7 +215,7 @@ impl Session {
     }
 
     pub(crate) async fn reset_abort(&self) {
-        let _ = self.abort_tx.lock().await.send(false);
+        let _ = self.abort_tx.lock().await.send_replace(false);
     }
 
     async fn take_steer(&self) -> Option<String> {

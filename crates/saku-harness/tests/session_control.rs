@@ -74,6 +74,70 @@ async fn stop_emits_run_aborted_for_active_run() {
     )));
 }
 
+/// After `stop` aborts a mid-tool Run, the next Run must be able to complete.
+///
+/// Repro for: abort flag stuck true because `watch::Sender::send(false)` fails
+/// when no abort receivers remain (session drops the initial receiver; tools only
+/// subscribe for the duration of `execute`).
+#[tokio::test]
+async fn run_after_stop_during_tool_is_not_immediately_aborted() {
+    use saku_harness::provider::ScriptedResponse;
+    use saku_harness::provider::fake::tool_call;
+    use saku_harness::tools::shell_tools;
+    use serde_json::json;
+
+    let tmp = TempDir::new().unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    fake.push(ScriptedResponse::ToolCalls(vec![tool_call(
+        "1",
+        "bash",
+        json!({"command": "sleep 30"}),
+    )]));
+    fake.push_text("follow-up ok");
+
+    let harness = Harness::new(config(&tmp), fake).unwrap();
+    for tool in shell_tools() {
+        harness.register_tool(tool).await;
+    }
+    let session = harness.session("q2-after-stop").await.unwrap();
+
+    let mut first = session.run(UserTurn::text("long")).await;
+    loop {
+        match first.next_event().await {
+            Some(RunEvent::ToolStarted { name, .. }) if name == "bash" => break,
+            Some(RunEvent::RunFinished) | Some(RunEvent::RunError { .. }) | None => {
+                panic!("bash never started");
+            }
+            _ => {}
+        }
+    }
+    // ToolStarted is emitted before the tool subscribes to abort; wait until bash
+    // is in wait_for_abort so stop()'s watch::send(true) has a live receiver.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    session.stop().await;
+    let first_events = first.collect().await;
+    assert!(
+        first_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::RunAborted)),
+        "expected first run to abort, got {first_events:?}"
+    );
+
+    let second_events = session.run(UserTurn::text("continue")).await.collect().await;
+    assert!(
+        second_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::RunFinished)),
+        "expected follow-up run to finish, got {second_events:?}"
+    );
+    assert!(
+        !second_events
+            .iter()
+            .any(|e| matches!(e, RunEvent::RunAborted)),
+        "follow-up must not be aborted, got {second_events:?}"
+    );
+}
+
 #[tokio::test]
 async fn steer_injects_after_tool_batch() {
     use saku_harness::provider::ScriptedResponse;

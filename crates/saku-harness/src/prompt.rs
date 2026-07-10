@@ -7,7 +7,9 @@ pub fn build_system_prompt(workspace: &Path, cwd: &Path, memory: &str) -> String
     prompt.push_str(
         "You are Saku, a Discord-hosted coding agent for an Authorised User.\n\
          Use tools to inspect and change the Workspace. Prefer find/grep before blind bash search. \
-         Read a file before editing it. Keep Memory limited to durable important facts (2200 character cap).\n\n",
+         Read a file before editing it. Update Memory only via the `memory` tool when retaining \
+         durable facts across Sessions; never claim you remembered unless that call succeeded. \
+         Keep Memory limited to durable important facts (2200 character cap).\n\n",
     );
     prompt.push_str(&format!("Workspace: {}\n", workspace.display()));
     prompt.push_str(&format!("Working Directory: {}\n", cwd.display()));
@@ -54,6 +56,13 @@ mod tests {
                 "Only use `cd … &&` inside `bash` for a one-shot command in a different directory without changing the Session."
             )
         );
+    }
+
+    #[test]
+    fn instructs_memory_tool_for_durable_facts() {
+        let text = build_system_prompt(Path::new("/ws"), Path::new("/ws"), "");
+        assert!(text.contains("Update Memory only via the `memory` tool"));
+        assert!(text.contains("never claim you remembered unless that call succeeded"));
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub fn tool_emoji(name: &str) -> &'static str {
         "read" => "📖",
         "edit" => "🔧",
         "write" => "✍️",
+        "memory" => "🧠",
         "find" => "🔍",
         "grep" => "🔎",
         "ls" => "📁",
@@ -26,6 +27,8 @@ pub fn args_preview(args: &Value) -> String {
                 path.to_string()
             } else if let Some(pattern) = map.get("pattern").and_then(|v| v.as_str()) {
                 pattern.to_string()
+            } else if let Some(content) = map.get("content").and_then(|v| v.as_str()) {
+                content.to_string()
             } else {
                 args.to_string()
             }
@@ -119,10 +122,21 @@ mod tests {
     }
 
     #[test]
-    fn args_preview_prefers_command_path_pattern() {
+    fn args_preview_prefers_command_path_pattern_content() {
         assert_eq!(args_preview(&json!({"command": "pwd"})), "`pwd`");
         assert_eq!(args_preview(&json!({"path": "src"})), "`src`");
         assert_eq!(args_preview(&json!({"pattern": "foo"})), "`foo`");
+        assert_eq!(
+            args_preview(&json!({"content": "prefers cargo"})),
+            "`prefers cargo`"
+        );
+    }
+
+    #[test]
+    fn memory_tool_has_emoji() {
+        assert_eq!(tool_emoji("memory"), "🧠");
+        let text = format_progress(&[("memory".into(), "`prefers cargo`".into())]);
+        assert!(text.starts_with("🧠 memory:"));
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::session::{
 };
 use crate::tools::{
     Tool, ToolContext, ToolError, ToolRegistry, ToolResult, background_tools, file_tools,
-    register_web_tools, search_tools, shell_tools,
+    memory_tools, register_web_tools, search_tools, shell_tools,
 };
 use crate::types::ToolCall;
 
@@ -136,10 +136,13 @@ impl Harness {
         self.inner.tools.lock().await.register(tool);
     }
 
-    /// Register the default Tool set: file, shell, background, search, then
+    /// Register the default Tool set: file, memory, shell, background, search, then
     /// credential-gated web Tools.
     pub async fn register_default_tools(&self) {
         for tool in file_tools() {
+            self.register_tool(tool).await;
+        }
+        for tool in memory_tools() {
             self.register_tool(tool).await;
         }
         for tool in shell_tools() {

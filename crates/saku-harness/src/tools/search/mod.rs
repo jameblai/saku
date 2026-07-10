@@ -156,8 +156,7 @@ impl Tool for LsTool {
 
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let path_arg = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-        let memory = crate::memory::memory_path(ctx.data_dir);
-        let dir = resolve_in_workspace(ctx.workspace, &ctx.cwd, path_arg, Some(&memory))
+        let dir = resolve_in_workspace(ctx.workspace, &ctx.cwd, path_arg)
             .map_err(|e| ToolError::Message(e.to_string()))?;
         if !dir.is_dir() {
             return Ok(ToolResult::error(format!(

@@ -2,6 +2,7 @@
 
 pub mod background;
 pub mod file;
+pub mod memory;
 pub mod search;
 pub mod shell;
 pub mod web;
@@ -19,6 +20,7 @@ use crate::types::{ContentPart, ToolDefinition};
 
 pub use background::{BgListTool, BgLogsTool, BgStartTool, BgStopTool, background_tools};
 pub use file::{EditTool, ReadTool, WriteTool, file_tools};
+pub use memory::{MemoryTool, memory_tools};
 pub use search::{FindTool, GrepTool, LsTool, search_tools};
 pub use shell::{BashTool, CdTool, shell_tools};
 pub use web::{register_web_tools, web_tools, web_tools_from_store};

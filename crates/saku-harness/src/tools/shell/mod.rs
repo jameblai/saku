@@ -39,8 +39,7 @@ impl Tool for CdTool {
 
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let path_arg = arg_string(&args, "path")?;
-        let memory = crate::memory::memory_path(ctx.data_dir);
-        let resolved = resolve_in_workspace(ctx.workspace, &ctx.cwd, &path_arg, Some(&memory))
+        let resolved = resolve_in_workspace(ctx.workspace, &ctx.cwd, &path_arg)
             .map_err(|e| ToolError::Message(e.to_string()))?;
 
         if !resolved.is_dir() {

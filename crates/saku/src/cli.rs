@@ -11,6 +11,8 @@ pub enum Command {
     Run { config: Option<PathBuf> },
     /// Host CLI Login for a Provider.
     LoginCodex,
+    /// Host CLI Login for the Exa Web Backend.
+    LoginExa,
     /// Interactive Setup (config + Codex Login).
     Setup,
 }
@@ -34,17 +36,19 @@ struct Cli {
 enum CliSubcommand {
     /// Interactive Setup: Discord config then Codex Login.
     Setup,
-    /// Obtain and store a Provider Credential.
+    /// Obtain and store a Provider or Web Backend Credential.
     Login {
         #[command(subcommand)]
-        provider: LoginProvider,
+        id: LoginId,
     },
 }
 
 #[derive(Debug, Subcommand)]
-enum LoginProvider {
+enum LoginId {
     /// ChatGPT / Codex subscription (device-code OAuth).
     Codex,
+    /// Exa Web Backend (API key).
+    Exa,
 }
 
 /// Parse argv (excluding program name) into a [`Command`].
@@ -63,8 +67,11 @@ where
         None => Command::Run { config: cli.config },
         Some(CliSubcommand::Setup) => Command::Setup,
         Some(CliSubcommand::Login {
-            provider: LoginProvider::Codex,
+            id: LoginId::Codex,
         }) => Command::LoginCodex,
+        Some(CliSubcommand::Login {
+            id: LoginId::Exa,
+        }) => Command::LoginExa,
     })
 }
 
@@ -96,13 +103,19 @@ mod tests {
     }
 
     #[test]
+    fn login_exa_subcommand() {
+        let cmd = parse_args(["login", "exa"]).expect("parse");
+        assert_eq!(cmd, Command::LoginExa);
+    }
+
+    #[test]
     fn setup_subcommand() {
         let cmd = parse_args(["setup"]).expect("parse");
         assert_eq!(cmd, Command::Setup);
     }
 
     #[test]
-    fn login_without_provider_is_error() {
+    fn login_without_id_is_error() {
         let err = parse_args(["login"]).unwrap_err();
         assert!(!err.to_string().is_empty());
     }

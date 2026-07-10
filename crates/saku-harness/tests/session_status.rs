@@ -22,6 +22,7 @@ fn config(tmp: &TempDir) -> Config {
         data_dir,
         default_model: "gpt-5.5".into(),
         default_effort: Effort::Medium,
+        web_backend: "exa".into(),
     }
 }
 

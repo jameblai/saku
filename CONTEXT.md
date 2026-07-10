@@ -44,16 +44,21 @@ _Avoid_: job, task, turn (turn = one LLM call inside a Run)
 
 **Provider**:
 A pluggable LLM backend identity (e.g. Codex subscription, a future Anthropic subscription, or an API-key vendor). Credentials and request auth are resolved per Provider. At the code boundary, a Provider streams completion events from a harness `Request` (transcript + tools + model + Effort).
-_Avoid_: model (a Provider exposes one or more models), backend, LLM
+_Avoid_: model (a Provider exposes one or more models), backend (alone), LLM, Web Backend
+
+
+**Web Backend**:
+A pluggable public-web service that implements search and/or extract for the Harness (Exa first; others later). Not an LLM Provider.
+_Avoid_: Provider, search provider, web provider
 
 
 **Credential**:
-Stored auth for one Provider — either OAuth tokens (subscription login) or an API key — used to authorize model requests and refreshed when expired. Persisted pi-style in `~/.saku/auth.json` (provider-id keys; `oauth` / `api_key` tagged entries; file mode `0600`; locked refresh).
+Stored auth for one Provider or Web Backend — OAuth tokens or an API key — used to authorize that identity’s requests and refreshed when expired. Persisted pi-style in `~/.saku/auth.json` (id keys; `oauth` / `api_key` tagged entries; file mode `0600`; locked refresh).
 _Avoid_: token, secret, api key (as the umbrella term)
 
 
 **Login**:
-A host CLI flow (`saku login <provider>`) that obtains and stores a Credential for a Provider (Codex uses device-code OAuth). Not performed inside Discord. Implemented in `saku-cli`, writing via the harness Credential store. Also run as the final step of Setup.
+A host CLI flow (`saku login <id>`) that obtains and stores a Credential for a Provider or Web Backend (Codex uses device-code OAuth; API-key identities accept a pasted key). Not performed inside Discord. Implemented in `saku-cli`, writing via the harness Credential store. Also run as the final step of Setup for the default Provider.
 _Avoid_: /login, sign-in (as product UI inside Discord)
 
 **Setup**:
@@ -62,7 +67,7 @@ _Avoid_: onboarding, install, init, first-run wizard (as product terms)
 
 
 **Tool**:
-A named capability the model may call during a Run. v1 set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
+A named capability the model may call during a Run. Core set: `bash`, `read`, `edit`, `write`, `find`, `grep`, `ls`, `cd`. Web set: `web_search`, `web_extract` — registered only when a Credential exists for the configured Web Backend. `find` and `grep` are backed by FFF (pi-fff semantics); `ls` is a thin directory listing; `cd` changes the Session Working Directory within the Workspace; web Tools call that Web Backend. Registered on the Harness via a dynamic schema + `execute` interface (JSON args in, content parts out).
 _Avoid_: function, action, skill
 
 

@@ -14,7 +14,10 @@ use crate::provider::Provider;
 use crate::session::{
     RunControl, Session, SessionState, SessionStore, StoreError, new_run_control,
 };
-use crate::tools::{Tool, ToolContext, ToolError, ToolRegistry, ToolResult};
+use crate::tools::{
+    Tool, ToolContext, ToolError, ToolRegistry, ToolResult, background_tools, file_tools,
+    register_web_tools, search_tools, shell_tools,
+};
 use crate::types::ToolCall;
 
 pub(crate) struct LiveSession {
@@ -131,6 +134,24 @@ impl Harness {
 
     pub async fn register_tool(&self, tool: Arc<dyn Tool>) {
         self.inner.tools.lock().await.register(tool);
+    }
+
+    /// Register the default Tool set: file, shell, background, search, then
+    /// credential-gated web Tools.
+    pub async fn register_default_tools(&self) {
+        for tool in file_tools() {
+            self.register_tool(tool).await;
+        }
+        for tool in shell_tools() {
+            self.register_tool(tool).await;
+        }
+        for tool in background_tools() {
+            self.register_tool(tool).await;
+        }
+        for tool in search_tools(Arc::clone(self.index())) {
+            self.register_tool(tool).await;
+        }
+        register_web_tools(self).await;
     }
 
     /// Load or create a Session for `thread_id`.

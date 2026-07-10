@@ -351,6 +351,9 @@ impl Session {
                 return Ok(());
             }
 
+            // Yield so concurrent steer() calls during the tool batch can land.
+            tokio::task::yield_now().await;
+
             // Apply steer after the current tool batch, before the next Provider call.
             if let Some(steer) = self.take_steer().await {
                 let steer_msg = Message::user_text(format!("[steer] {steer}"));
@@ -384,6 +387,7 @@ impl Session {
                 name: call.name.clone(),
                 args: call.arguments.clone(),
             });
+            tokio::task::yield_now().await;
             let result = self.inner.execute_tool(self, call).await;
             let ok = result.as_ref().map(|r| !r.is_error).unwrap_or(false);
             let tool_message = match result {

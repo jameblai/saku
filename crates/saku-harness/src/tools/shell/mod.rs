@@ -22,7 +22,8 @@ impl Tool for CdTool {
     }
 
     fn description(&self) -> &str {
-        "Change the Session Working Directory to a directory inside the Workspace."
+        "Change the Session Working Directory to a directory inside the Workspace. \
+         Call this when entering a project for multiple steps so subsequent tools (including bash) run there."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -78,7 +79,9 @@ impl Tool for BashTool {
     }
 
     fn description(&self) -> &str {
-        "Run a bash command in the Session Working Directory. Optional timeout in seconds (no default)."
+        "Run a bash command in the Session Working Directory. For ongoing project work, call `cd` first \
+         instead of prefixing with `cd … &&`. Bash `cd` is only for a one-shot in a different directory \
+         without changing the Session. Optional timeout in seconds (no default)."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -174,5 +177,28 @@ async fn wait_for_abort(mut abort: tokio::sync::watch::Receiver<bool>) {
         if abort.changed().await.is_err() {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::Tool;
+
+    #[test]
+    fn cd_description_covers_multi_step_project_work() {
+        let desc = CdTool.description();
+        assert!(desc.contains("Session Working Directory"));
+        assert!(desc.contains("entering a project for multiple steps"));
+        assert!(desc.contains("subsequent tools"));
+    }
+
+    #[test]
+    fn bash_description_prefers_session_cd_with_one_shot_exception() {
+        let desc = BashTool.description();
+        assert!(desc.contains("Session Working Directory"));
+        assert!(desc.contains("call `cd` first"));
+        assert!(desc.contains("cd … &&"));
+        assert!(desc.contains("one-shot"));
     }
 }

@@ -11,6 +11,10 @@ pub fn build_system_prompt(workspace: &Path, cwd: &Path, memory: &str) -> String
     );
     prompt.push_str(&format!("Workspace: {}\n", workspace.display()));
     prompt.push_str(&format!("Working Directory: {}\n", cwd.display()));
+    prompt.push_str(
+        "For ongoing work in a project directory, call `cd` to set the Session Working Directory before further tools. \
+         Only use `cd … &&` inside `bash` for a one-shot command in a different directory without changing the Session.\n",
+    );
     prompt.push_str("\n# Memory\n");
     if memory.trim().is_empty() {
         prompt.push_str("(empty)\n");
@@ -35,6 +39,21 @@ mod tests {
         assert!(text.contains("Working Directory: /ws/proj"));
         assert!(text.contains("likes rust"));
         assert!(text.contains("Saku"));
+    }
+
+    #[test]
+    fn instructs_session_cd_for_ongoing_project_work() {
+        let text = build_system_prompt(Path::new("/ws"), Path::new("/ws"), "");
+        assert!(
+            text.contains(
+                "For ongoing work in a project directory, call `cd` to set the Session Working Directory before further tools."
+            )
+        );
+        assert!(
+            text.contains(
+                "Only use `cd … &&` inside `bash` for a one-shot command in a different directory without changing the Session."
+            )
+        );
     }
 
     #[test]

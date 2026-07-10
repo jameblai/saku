@@ -1,14 +1,13 @@
 //! Pi-like Credential persistence at `{data_dir}/auth.json`.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
-use fs4::fs_std::FileExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -146,7 +145,7 @@ impl CredentialStore {
         chmod_0600(&self.path)?;
 
         // Lock released when `file` drops (and we unlock explicitly).
-        let _ = FileExt::unlock(&file);
+        let _ = file.unlock();
         Ok(result)
     }
 
@@ -189,13 +188,12 @@ fn chmod_0600(path: &Path) -> Result<(), CredentialError> {
 fn acquire_exclusive_lock(file: &File) -> Result<(), CredentialError> {
     // Retry briefly so concurrent modify tests / processes can serialize.
     for attempt in 0..50 {
-        match file.try_lock_exclusive() {
-            Ok(true) => return Ok(()),
-            Ok(false) => thread::sleep(Duration::from_millis(10 + attempt)),
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+        match file.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(TryLockError::WouldBlock) => {
                 thread::sleep(Duration::from_millis(10 + attempt));
             }
-            Err(err) => return Err(err.into()),
+            Err(TryLockError::Error(err)) => return Err(err.into()),
         }
     }
     Err(CredentialError::LockTimeout)

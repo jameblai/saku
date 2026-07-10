@@ -2,7 +2,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use rand::RngCore;
+use rand::Rng;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -256,7 +256,7 @@ fn base64_url_decode(input: &str) -> Result<Vec<u8>, ()> {
 #[allow(dead_code)]
 fn generate_pkce() -> (String, String) {
     let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     let verifier = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes);
     let challenge = base64::Engine::encode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,

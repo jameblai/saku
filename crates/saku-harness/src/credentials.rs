@@ -291,6 +291,8 @@ mod tests {
                             Some(Credential::ApiKey { key }) => key.parse().unwrap_or(0),
                             _ => 0,
                         };
+                        // Hold the critical section briefly so contention is real.
+                        thread::sleep(Duration::from_millis(5));
                         Ok(Some(Credential::ApiKey {
                             key: (n + 1).to_string(),
                         }))

@@ -74,9 +74,9 @@ pub fn default_local_summarize(older: &[Message]) -> String {
         let text = msg
             .content
             .iter()
-            .filter_map(|c| match c {
-                ContentPart::Text { text } => Some(text.as_str()),
-                _ => Some("[image]"),
+            .map(|c| match c {
+                ContentPart::Text { text } => text.as_str(),
+                _ => "[image]",
             })
             .collect::<Vec<_>>()
             .join(" ");
@@ -99,10 +99,8 @@ mod tests {
         for i in 0..20 {
             messages.push(Message::user_text(format!("msg {i}")));
         }
-        let result = compact_messages(&messages, 5, |older| {
-            format!("summarized {}", older.len())
-        })
-        .expect("compacted");
+        let result = compact_messages(&messages, 5, |older| format!("summarized {}", older.len()))
+            .expect("compacted");
         assert!(result.summary.contains("summarized 15"));
         assert_eq!(result.kept_messages.len(), 6); // summary + 5
         assert!(matches!(

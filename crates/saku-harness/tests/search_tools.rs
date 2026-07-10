@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use saku_harness::Harness;
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::fake::tool_call;
 use saku_harness::provider::{FakeProvider, ScriptedResponse};
 use saku_harness::tools::search_tools;
 use saku_harness::types::{ContentPart, RunEvent, UserTurn};
-use saku_harness::Harness;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -16,8 +16,16 @@ fn config(tmp: &TempDir) -> Config {
     let data_dir = tmp.path().join("data");
     std::fs::create_dir_all(workspace.join("src")).unwrap();
     std::fs::create_dir_all(&data_dir).unwrap();
-    std::fs::write(workspace.join("src/main.rs"), "fn main() { println!(\"hi\"); }\n").unwrap();
-    std::fs::write(workspace.join("src/lib.rs"), "pub fn add(a: i32, b: i32) -> i32 { a + b }\n").unwrap();
+    std::fs::write(
+        workspace.join("src/main.rs"),
+        "fn main() { println!(\"hi\"); }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        workspace.join("src/lib.rs"),
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }\n",
+    )
+    .unwrap();
     std::fs::write(workspace.join("README.md"), "hello saku\n").unwrap();
     Config {
         discord_token: "t".into(),
@@ -71,9 +79,21 @@ async fn find_grep_ls_via_fake_provider() {
     let session = harness.session("search-1").await.unwrap();
     let events = session.run(UserTurn::text("search")).await.collect().await;
 
-    assert!(events.iter().any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "find")));
-    assert!(events.iter().any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "grep")));
-    assert!(events.iter().any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "ls")));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "find"))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "grep"))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "ls"))
+    );
     assert!(events.contains(&RunEvent::RunFinished));
 
     let state = session.snapshot().await;

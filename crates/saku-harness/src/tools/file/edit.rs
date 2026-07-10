@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{
     arg_string, maybe_enforce_memory_cap, ok_text, record_snapshot, require_fresh_snapshot,
@@ -44,7 +44,8 @@ impl Tool for EditTool {
             )));
         }
         require_fresh_snapshot(ctx.session, &path).await?;
-        let content = std::fs::read_to_string(&path).map_err(|e| ToolError::Message(e.to_string()))?;
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| ToolError::Message(e.to_string()))?;
         let matches: Vec<_> = content.match_indices(&old).collect();
         if matches.is_empty() {
             return Ok(ToolResult::error("old_string not found in file"));

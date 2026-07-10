@@ -60,9 +60,7 @@ where
     )?;
 
     Ok(match cli.command {
-        None => Command::Run {
-            config: cli.config,
-        },
+        None => Command::Run { config: cli.config },
         Some(CliSubcommand::Setup) => Command::Setup,
         Some(CliSubcommand::Login {
             provider: LoginProvider::Codex,

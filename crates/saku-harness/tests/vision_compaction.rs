@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use saku_harness::compaction::{compact_messages, estimate_tokens, DEFAULT_KEEP_RECENT};
+use saku_harness::compaction::{DEFAULT_KEEP_RECENT, compact_messages, estimate_tokens};
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::fake::tool_call;
 use saku_harness::provider::{FakeProvider, ScriptedResponse};
 use saku_harness::tools::file_tools;
 use saku_harness::types::{ContentPart, Message, RunEvent, UserTurn};
-use saku_harness::{resize_for_provider, Harness};
+use saku_harness::{Harness, resize_for_provider};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -69,11 +69,8 @@ async fn user_turn_images_reach_provider_request() {
     let png = {
         let img = image::DynamicImage::new_rgb8(4, 4);
         let mut buf = Vec::new();
-        img.write_to(
-            &mut std::io::Cursor::new(&mut buf),
-            image::ImageFormat::Png,
-        )
-        .unwrap();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
         buf
     };
     let (resized, mime) = resize_for_provider(&png, Some("image/png")).unwrap();
@@ -88,10 +85,12 @@ async fn user_turn_images_reach_provider_request() {
     let events = session.run(turn).await.collect().await;
     assert!(events.contains(&RunEvent::RunFinished));
     let req = fake.last_request().unwrap();
-    assert!(req.messages[0]
-        .content
-        .iter()
-        .any(|c| matches!(c, ContentPart::Image { .. })));
+    assert!(
+        req.messages[0]
+            .content
+            .iter()
+            .any(|c| matches!(c, ContentPart::Image { .. }))
+    );
 }
 
 #[test]

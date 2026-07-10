@@ -63,11 +63,7 @@ pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters_schema(&self) -> Value;
-    async fn execute(
-        &self,
-        ctx: &ToolContext<'_>,
-        args: Value,
-    ) -> Result<ToolResult, ToolError>;
+    async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError>;
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {

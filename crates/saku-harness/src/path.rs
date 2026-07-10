@@ -37,25 +37,27 @@ pub fn resolve_in_workspace(
 
     // Fast path: exact Memory allowlist before existence checks that would fail
     // for a not-yet-created Memory file on write.
-    if let Some(allow) = memory_allow {
-        if paths_equal_lexically(&joined, allow) || paths_equal_after_canonicalize(&joined, allow) {
-            return Ok(allow.to_path_buf());
-        }
+    if let Some(allow) = memory_allow
+        && (paths_equal_lexically(&joined, allow) || paths_equal_after_canonicalize(&joined, allow))
+    {
+        return Ok(allow.to_path_buf());
     }
 
     let canonical = canonicalize_existing_or_parent(&joined)?;
-    let workspace_canon = workspace.canonicalize().map_err(|source| PathError::Canonicalize {
-        path: workspace.to_path_buf(),
-        source,
-    })?;
+    let workspace_canon = workspace
+        .canonicalize()
+        .map_err(|source| PathError::Canonicalize {
+            path: workspace.to_path_buf(),
+            source,
+        })?;
 
     if !is_within(&canonical, &workspace_canon) {
         // Memory allowlist after canonicalize (symlink / relative forms).
         if let Some(allow) = memory_allow {
-            if let Ok(allow_canon) = allow.canonicalize() {
-                if canonical == allow_canon {
-                    return Ok(canonical);
-                }
+            if let Ok(allow_canon) = allow.canonicalize()
+                && canonical == allow_canon
+            {
+                return Ok(canonical);
             }
             if paths_equal_lexically(&canonical, allow) {
                 return Ok(allow.to_path_buf());
@@ -82,21 +84,27 @@ fn paths_equal_after_canonicalize(a: &Path, b: &Path) -> bool {
 /// component (for create-new targets that do not exist yet).
 fn canonicalize_existing_or_parent(path: &Path) -> Result<PathBuf, PathError> {
     if path.exists() {
-        return path.canonicalize().map_err(|source| PathError::Canonicalize {
-            path: path.to_path_buf(),
-            source,
-        });
+        return path
+            .canonicalize()
+            .map_err(|source| PathError::Canonicalize {
+                path: path.to_path_buf(),
+                source,
+            });
     }
 
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     if !parent.exists() {
         return Err(PathError::NotFound(path.to_path_buf()));
     }
-    let parent_canon = parent.canonicalize().map_err(|source| PathError::Canonicalize {
-        path: parent.to_path_buf(),
-        source,
-    })?;
-    let name = path.file_name().ok_or_else(|| PathError::NotFound(path.to_path_buf()))?;
+    let parent_canon = parent
+        .canonicalize()
+        .map_err(|source| PathError::Canonicalize {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| PathError::NotFound(path.to_path_buf()))?;
     Ok(parent_canon.join(name))
 }
 

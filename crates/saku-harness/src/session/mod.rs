@@ -10,12 +10,12 @@ use futures::StreamExt;
 use tokio::sync::{Mutex, mpsc, watch};
 
 use crate::compaction::{
-    compact_messages, default_local_summarize, estimate_tokens, DEFAULT_COMPACTION_TOKEN_LIMIT,
-    DEFAULT_KEEP_RECENT,
+    DEFAULT_COMPACTION_TOKEN_LIMIT, DEFAULT_KEEP_RECENT, compact_messages, default_local_summarize,
+    estimate_tokens,
 };
 use crate::config::Effort;
 use crate::harness::HarnessInner;
-use crate::memory::{read_memory, MEMORY_CHAR_LIMIT};
+use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
 use crate::prompt::build_system_prompt;
 use crate::types::{Message, ProviderEvent, Request, Role, RunEvent, ToolCall, UserTurn};
 
@@ -115,9 +115,7 @@ impl Session {
     pub async fn set_effort(&self, effort: Effort) -> Result<(), String> {
         let model = self.state.lock().await.model.clone();
         if !crate::provider::is_supported_effort(&model, effort) {
-            return Err(format!(
-                "unsupported effort `{effort}` for model `{model}`"
-            ));
+            return Err(format!("unsupported effort `{effort}` for model `{model}`"));
         }
         self.state.lock().await.effort = effort;
         self.inner
@@ -222,33 +220,35 @@ impl Session {
                     memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
                 }
                 let system_probe = build_system_prompt(&self.inner.workspace, &state.cwd, &memory);
-                if estimate_tokens(&state.messages, &system_probe) > DEFAULT_COMPACTION_TOKEN_LIMIT {
-                    if let Some(result) =
-                        compact_messages(&state.messages, DEFAULT_KEEP_RECENT, default_local_summarize)
-                    {
+                if estimate_tokens(&state.messages, &system_probe) > DEFAULT_COMPACTION_TOKEN_LIMIT
+                    && let Some(result) = compact_messages(
+                        &state.messages,
+                        DEFAULT_KEEP_RECENT,
+                        default_local_summarize,
+                    )
+                {
+                    self.inner
+                        .store
+                        .append_compaction(&self.thread_id, &result.summary)
+                        .map_err(|e| RunError::Store(e.to_string()))?;
+                    for msg in &result.kept_messages {
+                        if msg
+                            .content
+                            .first()
+                            .and_then(|c| match c {
+                                crate::types::ContentPart::Text { text } => Some(text.as_str()),
+                                _ => None,
+                            })
+                            .is_some_and(|t| t.starts_with("[compaction summary"))
+                        {
+                            continue;
+                        }
                         self.inner
                             .store
-                            .append_compaction(&self.thread_id, &result.summary)
+                            .append_message(&self.thread_id, msg)
                             .map_err(|e| RunError::Store(e.to_string()))?;
-                        for msg in &result.kept_messages {
-                            if msg
-                                .content
-                                .first()
-                                .and_then(|c| match c {
-                                    crate::types::ContentPart::Text { text } => Some(text.as_str()),
-                                    _ => None,
-                                })
-                                .is_some_and(|t| t.starts_with("[compaction summary"))
-                            {
-                                continue;
-                            }
-                            self.inner
-                                .store
-                                .append_message(&self.thread_id, msg)
-                                .map_err(|e| RunError::Store(e.to_string()))?;
-                        }
-                        state.messages = result.kept_messages;
                     }
+                    state.messages = result.kept_messages;
                 }
 
                 let tools = self.inner.tools.lock().await.definitions();

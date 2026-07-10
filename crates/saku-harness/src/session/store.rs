@@ -79,7 +79,13 @@ impl SessionStore {
         // Discord snowflakes are safe filenames; still sanitize path separators.
         let safe: String = thread_id
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         self.sessions_dir.join(format!("{safe}.jsonl"))
     }
@@ -102,10 +108,7 @@ impl SessionStore {
                 model: default_model.into(),
                 effort: default_effort.as_str().into(),
             };
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)?;
+            let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
             writeln!(file, "{}", serde_json::to_string(&header)?)?;
             return Ok(SessionState {
                 thread_id: thread_id.into(),
@@ -129,7 +132,9 @@ impl SessionStore {
             .ok_or_else(|| StoreError::Invalid("empty session file".into()))??;
         let header: SessionHeader = serde_json::from_str(&header_line)?;
         if header.entry_type != "session" {
-            return Err(StoreError::Invalid("first line must be session header".into()));
+            return Err(StoreError::Invalid(
+                "first line must be session header".into(),
+            ));
         }
 
         let mut state = SessionState {

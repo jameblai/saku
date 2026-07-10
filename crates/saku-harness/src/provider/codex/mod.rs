@@ -102,7 +102,8 @@ async fn complete_inner(
     let mut events = Vec::new();
     let mut buffer = String::new();
     let mut tool_args: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let mut tool_names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut tool_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut byte_stream = response.bytes_stream();
 
     while let Some(chunk) = byte_stream.next().await {
@@ -122,12 +123,7 @@ async fn complete_inner(
                 let Ok(value) = serde_json::from_str::<Value>(data) else {
                     continue;
                 };
-                parse_sse_event(
-                    &value,
-                    &mut events,
-                    &mut tool_args,
-                    &mut tool_names,
-                );
+                parse_sse_event(&value, &mut events, &mut tool_args, &mut tool_names);
             }
         }
     }
@@ -162,26 +158,26 @@ fn parse_sse_event(
             }
         }
         "response.output_item.added" => {
-            if let Some(item) = value.get("item") {
-                if item.get("type").and_then(|v| v.as_str()) == Some("function_call") {
-                    let call_id = item
-                        .get("call_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let name = item
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let args = item
-                        .get("arguments")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    tool_names.insert(call_id.clone(), name);
-                    tool_args.insert(call_id, args);
-                }
+            if let Some(item) = value.get("item")
+                && item.get("type").and_then(|v| v.as_str()) == Some("function_call")
+            {
+                let call_id = item
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args = item
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                tool_names.insert(call_id.clone(), name);
+                tool_args.insert(call_id, args);
             }
         }
         "response.function_call_arguments.delta" => {
@@ -208,32 +204,32 @@ fn parse_sse_event(
             }
         }
         "response.output_item.done" => {
-            if let Some(item) = value.get("item") {
-                if item.get("type").and_then(|v| v.as_str()) == Some("function_call") {
-                    let call_id = item
-                        .get("call_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let name = item
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .or_else(|| tool_names.get(&call_id).map(String::as_str))
-                        .unwrap_or("unknown")
-                        .to_string();
-                    let args_str = item
-                        .get("arguments")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string)
-                        .or_else(|| tool_args.get(&call_id).cloned())
-                        .unwrap_or_else(|| "{}".into());
-                    let arguments = serde_json::from_str(&args_str).unwrap_or(json!({}));
-                    events.push(Ok(ProviderEvent::ToolCall {
-                        id: call_id,
-                        name,
-                        arguments,
-                    }));
-                }
+            if let Some(item) = value.get("item")
+                && item.get("type").and_then(|v| v.as_str()) == Some("function_call")
+            {
+                let call_id = item
+                    .get("call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| tool_names.get(&call_id).map(String::as_str))
+                    .unwrap_or("unknown")
+                    .to_string();
+                let args_str = item
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .or_else(|| tool_args.get(&call_id).cloned())
+                    .unwrap_or_else(|| "{}".into());
+                let arguments = serde_json::from_str(&args_str).unwrap_or(json!({}));
+                events.push(Ok(ProviderEvent::ToolCall {
+                    id: call_id,
+                    name,
+                    arguments,
+                }));
             }
         }
         "response.completed" | "response.incomplete" | "response.done" => {

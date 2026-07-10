@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use saku_harness::Harness;
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::fake::tool_call;
 use saku_harness::provider::{FakeProvider, ScriptedResponse};
 use saku_harness::tools::shell_tools;
 use saku_harness::types::{RunEvent, UserTurn};
-use saku_harness::Harness;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -54,7 +54,11 @@ async fn cd_and_bash_use_working_directory() {
 
     let harness = harness_with_shell(fake, cfg.clone()).await;
     let session = harness.session("shell-1").await.unwrap();
-    let events = session.run(UserTurn::text("cd and pwd")).await.collect().await;
+    let events = session
+        .run(UserTurn::text("cd and pwd"))
+        .await
+        .collect()
+        .await;
     assert!(events.contains(&RunEvent::RunFinished));
 
     let state = session.snapshot().await;

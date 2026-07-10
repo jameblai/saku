@@ -80,7 +80,10 @@ mod tests {
 
     #[test]
     fn formats_progress_with_emoji() {
-        let text = format_progress(&[("bash".into(), "\"ls\"".into()), ("read".into(), "\"a.rs\"".into())]);
+        let text = format_progress(&[
+            ("bash".into(), "\"ls\"".into()),
+            ("read".into(), "\"a.rs\"".into()),
+        ]);
         assert!(text.contains("💻 bash:"));
         assert!(text.contains("📖 read:"));
     }

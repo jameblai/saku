@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use saku_harness::Harness;
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::fake::tool_call;
 use saku_harness::provider::{FakeProvider, ScriptedResponse};
 use saku_harness::tools::file_tools;
 use saku_harness::types::{RunEvent, UserTurn};
-use saku_harness::Harness;
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -62,14 +62,36 @@ async fn read_edit_write_happy_path() {
 
     let harness = harness_with_files(fake, cfg).await;
     let session = harness.session("t1").await.unwrap();
-    let events = session.run(UserTurn::text("fix files")).await.collect().await;
+    let events = session
+        .run(UserTurn::text("fix files"))
+        .await
+        .collect()
+        .await;
 
-    assert!(events.iter().any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "read")));
-    assert!(events.iter().any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "edit")));
-    assert!(events.iter().any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "write")));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "read"))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "edit"))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, RunEvent::ToolFinished { name, ok: true } if name == "write"))
+    );
     assert!(events.contains(&RunEvent::RunFinished));
-    assert_eq!(std::fs::read_to_string(workspace.join("a.txt")).unwrap(), "hello world");
-    assert_eq!(std::fs::read_to_string(workspace.join("b.txt")).unwrap(), "new");
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("a.txt")).unwrap(),
+        "hello world"
+    );
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("b.txt")).unwrap(),
+        "new"
+    );
 }
 
 #[tokio::test]
@@ -145,7 +167,11 @@ async fn write_existing_without_snapshot_fails() {
     fake.push_text("done");
     let harness = harness_with_files(fake, cfg).await;
     let session = harness.session("t4").await.unwrap();
-    let events = session.run(UserTurn::text("overwrite")).await.collect().await;
+    let events = session
+        .run(UserTurn::text("overwrite"))
+        .await
+        .collect()
+        .await;
     assert!(events.iter().any(|e| matches!(
         e,
         RunEvent::ToolFinished { name, ok: false } if name == "write"

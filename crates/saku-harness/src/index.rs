@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use fff_search::file_picker::{FFFMode, FilePicker, FilePickerOptions, FuzzySearchOptions};
 use fff_search::grep::{GrepMode, GrepSearchOptions};
-use fff_search::{PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency, SharedQueryTracker};
+use fff_search::{
+    PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency, SharedQueryTracker,
+};
 use thiserror::Error;
 use tokio::sync::OnceCell;
 
@@ -27,7 +29,10 @@ pub struct WorkspaceIndex {
 }
 
 impl WorkspaceIndex {
-    pub fn new(workspace: impl Into<PathBuf>, data_dir: impl AsRef<Path>) -> Result<Self, IndexError> {
+    pub fn new(
+        workspace: impl Into<PathBuf>,
+        data_dir: impl AsRef<Path>,
+    ) -> Result<Self, IndexError> {
         let workspace = workspace.into();
         let data_dir = data_dir.as_ref();
         let fff_dir = data_dir.join("fff");
@@ -38,7 +43,8 @@ impl WorkspaceIndex {
         let shared_query_tracker = SharedQueryTracker::default();
 
         // Best-effort DB init; search still works without frecency.
-        if let Ok(frecency) = fff_search::frecency::FrecencyTracker::open(fff_dir.join("frecency")) {
+        if let Ok(frecency) = fff_search::frecency::FrecencyTracker::open(fff_dir.join("frecency"))
+        {
             let _ = shared_frecency.init(frecency);
         }
         if let Ok(qt) = fff_search::query_tracker::QueryTracker::open(fff_dir.join("queries")) {

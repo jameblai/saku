@@ -10,8 +10,8 @@ use std::time::SystemTime;
 
 use sha2::{Digest, Sha256};
 
-use crate::memory::{memory_path, validate_memory_write, MemoryError};
-use crate::path::{resolve_in_workspace, PathError};
+use crate::memory::{MemoryError, memory_path, validate_memory_write};
+use crate::path::{PathError, resolve_in_workspace};
 use crate::session::{ReadSnapshot, Session};
 use crate::tools::{Tool, ToolError, ToolResult};
 
@@ -93,7 +93,10 @@ pub(crate) async fn record_snapshot(session: &Session, path: &Path) -> Result<()
     Ok(())
 }
 
-pub(crate) async fn require_fresh_snapshot(session: &Session, path: &Path) -> Result<(), ToolError> {
+pub(crate) async fn require_fresh_snapshot(
+    session: &Session,
+    path: &Path,
+) -> Result<(), ToolError> {
     let state = session.snapshot().await;
     let Some(snap) = state.read_snapshots.iter().find(|s| s.path == path) else {
         return Err(ToolError::Message(format!(
@@ -111,11 +114,14 @@ pub(crate) async fn require_fresh_snapshot(session: &Session, path: &Path) -> Re
     Ok(())
 }
 
-pub(crate) fn maybe_enforce_memory_cap(path: &Path, data_dir: &Path, content: &str) -> Result<(), ToolError> {
+pub(crate) fn maybe_enforce_memory_cap(
+    path: &Path,
+    data_dir: &Path,
+    content: &str,
+) -> Result<(), ToolError> {
     let mem = memory_path(data_dir);
     let same = path == mem
-        || (path.canonicalize().ok().zip(mem.canonicalize().ok()))
-            .is_some_and(|(a, b)| a == b);
+        || (path.canonicalize().ok().zip(mem.canonicalize().ok())).is_some_and(|(a, b)| a == b);
     if same {
         validate_memory_write(content).map_err(|e| match e {
             MemoryError::TooLong { actual } => ToolError::Message(format!(

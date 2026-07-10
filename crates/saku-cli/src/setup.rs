@@ -41,7 +41,9 @@ pub fn resolve_config_path(config_path: Option<PathBuf>) -> Result<PathBuf, Stri
 }
 
 fn print_discord_help() {
-    println!("Create a bot at https://discord.com/developers/applications, enable the intents below, then paste the token.");
+    println!(
+        "Create a bot at https://discord.com/developers/applications, enable the intents below, then paste the token."
+    );
     println!();
     println!("Required Gateway intents:");
     println!("  - GUILDS");
@@ -103,10 +105,10 @@ fn prompt_authorized_user_ids(prefill: Option<&[String]>) -> Result<Vec<String>,
         };
         let line = prompt_line(&label)?;
         if line.is_empty() {
-            if let Some(ids) = prefill {
-                if !ids.is_empty() {
-                    return Ok(ids.to_vec());
-                }
+            if let Some(ids) = prefill
+                && !ids.is_empty()
+            {
+                return Ok(ids.to_vec());
             }
             eprintln!("at least one Discord user id is required");
             continue;
@@ -137,7 +139,10 @@ pub async fn setup(config_path: Option<PathBuf>) -> Result<(), String> {
     match crate::login_codex(Some(path.clone())).await {
         Ok(()) => Ok(()),
         Err(err) => {
-            eprintln!("Codex Login failed (config kept at {}): {err}", path.display());
+            eprintln!(
+                "Codex Login failed (config kept at {}): {err}",
+                path.display()
+            );
             Err(err)
         }
     }

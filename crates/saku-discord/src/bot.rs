@@ -3,19 +3,19 @@
 use std::sync::Arc;
 
 use saku_harness::{
-    Config, Effort, Harness, RunEvent, UserTurn, file_tools, search_tools, shell_tools,
-    ALLOWED_MODELS, is_allowed_model, is_supported_effort, supported_efforts,
+    ALLOWED_MODELS, Config, Effort, Harness, RunEvent, UserTurn, file_tools, is_allowed_model,
+    is_supported_effort, search_tools, shell_tools, supported_efforts,
 };
+use serenity::Client;
 use serenity::all::{
     ChannelId, Context, CreateMessage, EventHandler, GatewayIntents, Message, ReactionType,
 };
 use serenity::async_trait;
-use serenity::Client;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::chunk::chunk_message;
-use crate::commands::{help_text, parse_command, BotCommand};
+use crate::commands::{BotCommand, help_text, parse_command};
 use crate::progress::{args_preview, format_progress};
 
 const HOURGLASS: &str = "⏳";
@@ -162,9 +162,8 @@ impl Handler {
                         ALLOWED_MODELS.join(", ")
                     )
                 } else if let Some(effort_str) = effort {
-                    let effort = parse_effort(&effort_str).ok_or_else(|| {
-                        format!("unsupported effort `{effort_str}`")
-                    })?;
+                    let effort = parse_effort(&effort_str)
+                        .ok_or_else(|| format!("unsupported effort `{effort_str}`"))?;
                     if !is_supported_effort(&id, effort) {
                         format!("unsupported effort `{effort_str}` for `{id}`")
                     } else {
@@ -185,11 +184,9 @@ impl Handler {
                     .collect();
                 format!("Effort levels for `{model}`: {}", levels.join(", "))
             }
-            BotCommand::Effort {
-                level: Some(level),
-            } => {
-                let effort = parse_effort(&level)
-                    .ok_or_else(|| format!("unsupported effort `{level}`"))?;
+            BotCommand::Effort { level: Some(level) } => {
+                let effort =
+                    parse_effort(&level).ok_or_else(|| format!("unsupported effort `{level}`"))?;
                 session.set_effort(effort).await?;
                 format!("Effort set to `{effort}`")
             }
@@ -225,7 +222,9 @@ impl Handler {
         while let Some(ev) = handle.next_event().await {
             match ev {
                 RunEvent::Queued => {
-                    let _ = msg.react(ctx, ReactionType::Unicode(HOURGLASS.into())).await;
+                    let _ = msg
+                        .react(ctx, ReactionType::Unicode(HOURGLASS.into()))
+                        .await;
                     hourglass = true;
                 }
                 RunEvent::Dequeued => {
@@ -254,9 +253,7 @@ impl Handler {
                             .channel_id
                             .send_message(
                                 ctx,
-                                CreateMessage::new()
-                                    .content(body)
-                                    .reference_message(msg),
+                                CreateMessage::new().content(body).reference_message(msg),
                             )
                             .await
                         {
@@ -293,7 +290,7 @@ impl Handler {
             let note = if fail_note.is_empty() {
                 "Run failed.".into()
             } else {
-                format!("{fail_note}")
+                fail_note
             };
             reply_chunks(ctx, msg, &note).await?;
             return Ok(());
@@ -345,7 +342,7 @@ fn strip_mention_raw(content: &str) -> String {
     let mut chars = content.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '<' && chars.peek() == Some(&'@') {
-            while let Some(x) = chars.next() {
+            for x in chars.by_ref() {
                 if x == '>' {
                     break;
                 }
@@ -362,9 +359,7 @@ async fn reply_chunks(ctx: &Context, msg: &Message, text: &str) -> Result<(), St
         msg.channel_id
             .send_message(
                 ctx,
-                CreateMessage::new()
-                    .content(chunk)
-                    .reference_message(msg),
+                CreateMessage::new().content(chunk).reference_message(msg),
             )
             .await
             .map_err(|e| e.to_string())?;

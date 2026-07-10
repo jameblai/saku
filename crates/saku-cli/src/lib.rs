@@ -7,15 +7,16 @@ pub use setup::{parse_authorized_user_ids, setup};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use saku_harness::{
-    Config, CredentialStore, DeviceCodeInfo, LoginNotify, login_device_code,
-};
+use saku_harness::{Config, CredentialStore, DeviceCodeInfo, LoginNotify, login_device_code};
 
 struct StdioNotify;
 
 impl LoginNotify for StdioNotify {
     fn device_code(&mut self, info: &DeviceCodeInfo) {
-        println!("Open {} and enter code: {}", info.verification_uri, info.user_code);
+        println!(
+            "Open {} and enter code: {}",
+            info.verification_uri, info.user_code
+        );
         let _ = io::stdout().flush();
     }
 

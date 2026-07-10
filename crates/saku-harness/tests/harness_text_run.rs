@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use saku_harness::Harness;
 use saku_harness::config::{Config, Effort};
 use saku_harness::memory::memory_path;
 use saku_harness::provider::FakeProvider;
 use saku_harness::types::{RunEvent, UserTurn};
-use saku_harness::Harness;
 use tempfile::TempDir;
 
 fn test_config(tmp: &TempDir) -> Config {
@@ -47,12 +47,9 @@ async fn text_only_run_streams_events_and_persists_transcript() {
 
     let state = session.snapshot().await;
     assert_eq!(state.messages.len(), 2);
-    assert!(
-        state.messages[1]
-            .content
-            .iter()
-            .any(|c| matches!(c, saku_harness::ContentPart::Text { text } if text == "Hello from Saku"))
-    );
+    assert!(state.messages[1].content.iter().any(
+        |c| matches!(c, saku_harness::ContentPart::Text { text } if text == "Hello from Saku")
+    ));
 
     // Replay from disk into a fresh Harness.
     let config2 = Config {

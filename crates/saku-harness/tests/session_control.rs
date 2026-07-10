@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
+use saku_harness::Harness;
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::FakeProvider;
 use saku_harness::types::{RunEvent, UserTurn};
-use saku_harness::Harness;
 use tempfile::TempDir;
 
 fn config(tmp: &TempDir) -> Config {
@@ -68,18 +68,16 @@ async fn stop_emits_run_aborted_for_active_run() {
     session.stop().await;
     let events = handle.collect().await;
     // Either aborted or finished depending on race; stop must not panic and queue must clear.
-    assert!(
-        events.iter().any(|e| matches!(
-            e,
-            RunEvent::RunAborted | RunEvent::RunFinished | RunEvent::RunError { .. }
-        ))
-    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        RunEvent::RunAborted | RunEvent::RunFinished | RunEvent::RunError { .. }
+    )));
 }
 
 #[tokio::test]
 async fn steer_injects_after_tool_batch() {
-    use saku_harness::provider::fake::tool_call;
     use saku_harness::provider::ScriptedResponse;
+    use saku_harness::provider::fake::tool_call;
     use saku_harness::tools::file_tools;
     use serde_json::json;
 
@@ -118,6 +116,8 @@ async fn steer_injects_after_tool_batch() {
     assert!(reqs.len() >= 2);
     let second = &reqs[1];
     assert!(second.messages.iter().any(|m| {
-        m.content.iter().any(|c| matches!(c, saku_harness::ContentPart::Text { text } if text.contains("[steer]")))
+        m.content.iter().any(
+            |c| matches!(c, saku_harness::ContentPart::Text { text } if text.contains("[steer]")),
+        )
     }));
 }

@@ -8,9 +8,10 @@
 
 咲く — to bloom
 
-*Early days. No warranty. Things will break.*
-
 </div>
+
+> [!WARNING]
+> Early days. No warranty. Things will break.
 
 ## Get running
 
@@ -46,7 +47,3 @@ Discord’s threading is ideal for agents — work and context stay in one place
 - Fast file search (fff)
 - A minimal system prompt
 - No permission popups
-
-## License
-
-MIT

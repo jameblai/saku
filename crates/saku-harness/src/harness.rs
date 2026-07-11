@@ -25,6 +25,7 @@ pub(crate) struct LiveSession {
     pub abort_tx: Arc<Mutex<watch::Sender<bool>>>,
     pub run_control: Arc<Mutex<RunControl>>,
     pub background: Arc<BackgroundProcesses>,
+    pub goal_driver: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Shared Harness state.
@@ -169,6 +170,7 @@ impl Harness {
                 abort_tx: Arc::clone(&live.abort_tx),
                 run_control: Arc::clone(&live.run_control),
                 background: Arc::clone(&live.background),
+                goal_driver: Arc::clone(&live.goal_driver),
             });
         }
         let loaded = self.inner.store.load_or_create(
@@ -182,6 +184,7 @@ impl Harness {
         let abort_tx = Arc::new(Mutex::new(abort_tx));
         let run_control = new_run_control();
         let background = Arc::new(BackgroundProcesses::new());
+        let goal_driver = Arc::new(std::sync::atomic::AtomicBool::new(false));
         sessions.insert(
             thread_id.clone(),
             LiveSession {
@@ -189,6 +192,7 @@ impl Harness {
                 abort_tx: Arc::clone(&abort_tx),
                 run_control: Arc::clone(&run_control),
                 background: Arc::clone(&background),
+                goal_driver: Arc::clone(&goal_driver),
             },
         );
         Ok(Session {
@@ -198,7 +202,22 @@ impl Harness {
             abort_tx,
             run_control,
             background,
+            goal_driver,
         })
+    }
+
+    /// Thread ids of persisted Sessions that currently have an active Goal.
+    ///
+    /// Used on bot startup to resume outer Goal loops (issue #50).
+    pub async fn sessions_with_active_goal(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for thread_id in self.inner.store.list_thread_ids() {
+            match self.inner.store.replay(&thread_id) {
+                Ok(state) if state.goal.is_some() => out.push(thread_id),
+                _ => {}
+            }
+        }
+        out
     }
 }
 

@@ -87,6 +87,8 @@ pub struct StatusReport {
     /// Configured Web Backend id (e.g. `exa`).
     pub web_backend: String,
     pub web_status: WebBackendStatus,
+    /// Active Session Goal, if any (issue #50).
+    pub goal: Option<crate::session::Goal>,
 }
 
 /// Format a plain-text status reply (Discord-safe).
@@ -120,6 +122,19 @@ pub fn format_status(report: &StatusReport) -> String {
         report.usage.input, report.usage.output, report.usage.cache_read, report.usage.cache_write
     ));
     out.push_str(&format!("Est. cost: ${:.4}\n", report.estimated_cost_usd));
+
+    if let Some(goal) = &report.goal {
+        out.push_str("\n**Goal**\n");
+        out.push_str(&format!("Condition: {}\n", goal.condition));
+        out.push_str(&format!(
+            "Run {}/{}\n",
+            goal.run_count,
+            crate::session::MAX_GOAL_RUNS
+        ));
+        if let Some(reason) = &goal.last_evaluator_reason {
+            out.push_str(&format!("Last reason: {reason}\n"));
+        }
+    }
 
     out.push_str("\n**Tools**\n");
     if !report.tool_names.is_empty() {
@@ -334,7 +349,29 @@ mod tests {
             ],
             web_backend: "exa".into(),
             web_status: WebBackendStatus::NoCredential,
+            goal: None,
         }
+    }
+
+    #[test]
+    fn format_status_shows_active_goal() {
+        let mut report = sample_report();
+        report.goal = Some(crate::session::Goal {
+            condition: "cargo test green".into(),
+            run_count: 7,
+            last_evaluator_reason: Some("two tests still failing".into()),
+        });
+        let text = format_status(&report);
+        assert!(text.contains("**Goal**"));
+        assert!(text.contains("Condition: cargo test green"));
+        assert!(text.contains("Run 7/20"));
+        assert!(text.contains("Last reason: two tests still failing"));
+    }
+
+    #[test]
+    fn format_status_omits_goal_section_when_inactive() {
+        let text = format_status(&sample_report());
+        assert!(!text.contains("**Goal**"));
     }
 
     #[test]

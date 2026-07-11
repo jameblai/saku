@@ -1,13 +1,13 @@
 //! Serenity bot wiring.
 
 use saku_harness::{
-    ALLOWED_MODELS, Config, Effort, Harness, RunEvent, UserTurn, is_allowed_model,
-    is_supported_effort, supported_efforts,
+    ALLOWED_MODELS, Config, Effort, GoalDecision, Harness, MAX_GOAL_RUNS, RunEvent, RunHandle,
+    Session, UserTurn, is_allowed_model, is_supported_effort, supported_efforts,
 };
 use serenity::Client;
 use serenity::all::{
-    ChannelId, Context, CreateMessage, EventHandler, GatewayIntents, Message, MessageReference,
-    ReactionType,
+    ChannelId, Context, CreateMessage, EditMessage, EventHandler, GatewayIntents, Message,
+    MessageReference, ReactionType,
 };
 use serenity::async_trait;
 use tokio::sync::Mutex;
@@ -53,7 +53,7 @@ impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: serenity::all::Ready) {
         *self.bot_user_id.lock().await = Some(ready.user.id);
         info!("saku connected as {}", ready.user.name);
-        let _ = ctx;
+        self.resume_goals(&ctx).await;
     }
 
     async fn message(&self, ctx: Context, msg: Message) {
@@ -196,6 +196,38 @@ impl Handler {
                 format!("Effort set to `{effort}`")
             }
             BotCommand::Status => session.status_text().await,
+            BotCommand::Goal { condition: None } => match session.goal().await {
+                Some(goal) => {
+                    let mut text = format!(
+                        "Goal · {}\nRun {}/{}",
+                        goal.condition, goal.run_count, MAX_GOAL_RUNS
+                    );
+                    if let Some(reason) = goal.last_evaluator_reason {
+                        text.push_str(&format!("\nLast reason: {reason}"));
+                    }
+                    text
+                }
+                None => "No active Goal. Set one with `saku goal <condition>`.".into(),
+            },
+            BotCommand::Goal {
+                condition: Some(condition),
+            } => {
+                session.set_goal(&condition).await?;
+                reply_chunks(ctx, msg.channel_id, msg, &format!("Goal set · {condition}")).await?;
+                react_ok(ctx, msg).await;
+                // Drive the outer Goal loop, seeding the first Run with the condition.
+                // If a driver is already active (a prior Goal), it picks up the
+                // replaced Goal on its next evaluation and this returns immediately.
+                drive_goal(
+                    ctx,
+                    msg.channel_id,
+                    Some(msg),
+                    &session,
+                    Some(UserTurn::text(condition)),
+                )
+                .await;
+                return Ok(());
+            }
             BotCommand::BgList => session.bg_list_text().await,
             BotCommand::BgLogs { pid } => {
                 session.bg_logs_text(pid, None).await.unwrap_or_else(|e| e)
@@ -206,6 +238,26 @@ impl Handler {
         reply_chunks(ctx, msg.channel_id, msg, &reply).await?;
         react_ok(ctx, msg).await;
         Ok(())
+    }
+
+    /// Resume outer Goal loops for Sessions that had an active Goal at shutdown.
+    async fn resume_goals(&self, ctx: &Context) {
+        let thread_ids = self.harness.sessions_with_active_goal().await;
+        for thread_id in thread_ids {
+            let Ok(channel_snowflake) = thread_id.parse::<u64>() else {
+                continue;
+            };
+            let ctx = ctx.clone();
+            let harness = self.harness.clone();
+            tokio::spawn(async move {
+                let Ok(session) = harness.session(&thread_id).await else {
+                    return;
+                };
+                let channel = ChannelId::new(channel_snowflake);
+                info!("resuming Goal for thread {thread_id}");
+                drive_goal(&ctx, channel, None, &session, None).await;
+            });
+        }
     }
 
     async fn run_turn(
@@ -222,113 +274,213 @@ impl Handler {
             .await
             .map_err(|e| e.to_string())?;
 
-        let mut handle = session.run(turn).await;
-        let mut answer = String::new();
-        let mut progress_lines: Vec<(String, String)> = Vec::new();
-        let mut progress_msg: Option<Message> = None;
-        let mut failed = false;
-        let mut aborted = false;
-        let mut fail_note = String::new();
-        let mut hourglass = false;
-        let mut typing: Option<TypingIndicator> = None;
+        let handle = session.run(turn).await;
+        render_run(ctx, Some(msg), output_channel, handle).await?;
+        Ok(())
+    }
+}
 
-        while let Some(ev) = handle.next_event().await {
-            match ev {
-                RunEvent::Queued => {
-                    let _ = msg
-                        .react(ctx, ReactionType::Unicode(HOURGLASS.into()))
-                        .await;
+/// Outcome of rendering one Run to Discord.
+struct RunRender {
+    failed: bool,
+    aborted: bool,
+}
+
+/// Stream one Run's events to Discord: hourglass/typing, Progress Message, and
+/// the Answer Message. `reference` is the triggering user Message (for reply
+/// references and reactions) or `None` for auto-continuation Goal Runs.
+async fn render_run(
+    ctx: &Context,
+    reference: Option<&Message>,
+    output_channel: ChannelId,
+    mut handle: RunHandle,
+) -> Result<RunRender, String> {
+    let mut answer = String::new();
+    let mut progress_lines: Vec<(String, String)> = Vec::new();
+    let mut progress_msg: Option<Message> = None;
+    let mut failed = false;
+    let mut aborted = false;
+    let mut fail_note = String::new();
+    let mut hourglass = false;
+    let mut typing: Option<TypingIndicator> = None;
+
+    while let Some(ev) = handle.next_event().await {
+        match ev {
+            RunEvent::Queued => {
+                if let Some(m) = reference {
+                    let _ = m.react(ctx, ReactionType::Unicode(HOURGLASS.into())).await;
                     hourglass = true;
                 }
-                RunEvent::Dequeued => {
-                    if hourglass {
-                        let _ = ctx
-                            .http
-                            .delete_reaction_me(
-                                msg.channel_id,
-                                msg.id,
-                                &ReactionType::Unicode(HOURGLASS.into()),
-                            )
-                            .await;
-                        hourglass = false;
-                    }
+            }
+            RunEvent::Dequeued => {
+                if hourglass && let Some(m) = reference {
+                    let _ = ctx
+                        .http
+                        .delete_reaction_me(
+                            m.channel_id,
+                            m.id,
+                            &ReactionType::Unicode(HOURGLASS.into()),
+                        )
+                        .await;
+                    hourglass = false;
                 }
-                RunEvent::RunStarted => {
-                    let http = ctx.http.clone();
-                    let channel = output_channel;
-                    typing = Some(TypingIndicator::start(TYPING_REFRESH, move || {
-                        let http = http.clone();
-                        async move {
-                            channel
-                                .broadcast_typing(&*http)
-                                .await
-                                .map(|_| ())
-                                .map_err(|_| ())
-                        }
-                    }));
-                }
-                RunEvent::TextDelta { text } => answer.push_str(&text),
-                RunEvent::ToolStarted { name, args } => {
-                    progress_lines.push((name, args_preview(&args)));
-                    let body = format_progress(&progress_lines);
-                    if let Some(ref mut existing) = progress_msg {
-                        let _ = existing
-                            .edit(ctx, serenity::all::EditMessage::new().content(body))
-                            .await;
-                    } else {
-                        match output_channel
-                            .send_message(ctx, build_reply(body, output_channel, msg))
+            }
+            RunEvent::RunStarted => {
+                let http = ctx.http.clone();
+                let channel = output_channel;
+                typing = Some(TypingIndicator::start(TYPING_REFRESH, move || {
+                    let http = http.clone();
+                    async move {
+                        channel
+                            .broadcast_typing(&*http)
                             .await
-                        {
-                            Ok(m) => progress_msg = Some(m),
-                            Err(err) => warn!("progress message failed: {err}"),
-                        }
+                            .map(|_| ())
+                            .map_err(|_| ())
+                    }
+                }));
+            }
+            RunEvent::TextDelta { text } => answer.push_str(&text),
+            RunEvent::ToolStarted { name, args } => {
+                progress_lines.push((name, args_preview(&args)));
+                let body = format_progress(&progress_lines);
+                if let Some(ref mut existing) = progress_msg {
+                    let _ = existing.edit(ctx, EditMessage::new().content(body)).await;
+                } else {
+                    match output_channel
+                        .send_message(ctx, build_reply_opt(body, output_channel, reference))
+                        .await
+                    {
+                        Ok(m) => progress_msg = Some(m),
+                        Err(err) => warn!("progress message failed: {err}"),
                     }
                 }
-                RunEvent::RunError { message } => {
-                    failed = true;
-                    fail_note = message;
-                }
-                RunEvent::RunAborted => {
-                    aborted = true;
-                    fail_note = "Run aborted.".into();
-                }
-                RunEvent::RunFinished => break,
-                _ => {}
+            }
+            RunEvent::RunError { message } => {
+                failed = true;
+                fail_note = message;
+            }
+            RunEvent::RunAborted => {
+                aborted = true;
+                fail_note = "Run aborted.".into();
+            }
+            RunEvent::RunFinished => break,
+            _ => {}
+        }
+    }
+
+    if let Some(t) = typing.take() {
+        t.stop();
+    }
+
+    if hourglass && let Some(m) = reference {
+        let _ = ctx
+            .http
+            .delete_reaction_me(m.channel_id, m.id, &ReactionType::Unicode(HOURGLASS.into()))
+            .await;
+    }
+
+    if failed || aborted {
+        let note = if fail_note.is_empty() {
+            "Run failed.".into()
+        } else {
+            fail_note
+        };
+        send_note(ctx, output_channel, reference, &note).await?;
+        return Ok(RunRender { failed, aborted });
+    }
+
+    if answer.trim().is_empty() {
+        answer = "(no assistant text)".into();
+    }
+    send_note(ctx, output_channel, reference, &answer).await?;
+    if let Some(m) = reference {
+        react_ok(ctx, m).await;
+    }
+    Ok(RunRender { failed, aborted })
+}
+
+/// Drive the outer Goal loop for `session`: optionally run an initial turn, then
+/// after each working Run consult the Goal Evaluator and either continue with a
+/// fresh Run, report achievement, or stop at the `MAX_GOAL_RUNS` cap.
+///
+/// Holds the single Goal-driver slot for its duration; if another loop already
+/// owns it (e.g. a resumed Goal), this returns without doing anything.
+async fn drive_goal(
+    ctx: &Context,
+    output_channel: ChannelId,
+    reference: Option<&Message>,
+    session: &Session,
+    initial_turn: Option<UserTurn>,
+) {
+    let _guard = match session.try_become_goal_driver() {
+        Some(guard) => guard,
+        None => return,
+    };
+
+    if let Some(turn) = initial_turn {
+        let handle = session.run(turn).await;
+        match render_run(ctx, reference, output_channel, handle).await {
+            Ok(render) if render.aborted || render.failed => return,
+            Ok(_) => {}
+            Err(err) => {
+                warn!("goal run render failed: {err}");
+                return;
             }
         }
+    }
 
-        if let Some(t) = typing.take() {
-            t.stop();
-        }
-
-        if hourglass {
-            let _ = ctx
-                .http
-                .delete_reaction_me(
-                    msg.channel_id,
-                    msg.id,
-                    &ReactionType::Unicode(HOURGLASS.into()),
+    loop {
+        let decision = match session.evaluate_goal().await {
+            Ok(decision) => decision,
+            Err(err) => {
+                warn!("goal evaluator failed: {err}");
+                session.clear_goal().await;
+                let _ = send_note(
+                    ctx,
+                    output_channel,
+                    None,
+                    &format!("Goal evaluator failed: {err} · Goal cleared."),
                 )
                 .await;
-        }
+                return;
+            }
+        };
 
-        if failed || aborted {
-            let note = if fail_note.is_empty() {
-                "Run failed.".into()
-            } else {
-                fail_note
-            };
-            reply_chunks(ctx, output_channel, msg, &note).await?;
-            return Ok(());
+        match decision {
+            GoalDecision::Inactive => return,
+            GoalDecision::Achieved { condition, .. } => {
+                let _ = send_note(
+                    ctx,
+                    output_channel,
+                    None,
+                    &format!("◎ goal achieved · {condition}"),
+                )
+                .await;
+                return;
+            }
+            GoalDecision::Exhausted { condition, run } => {
+                let _ = send_note(
+                    ctx,
+                    output_channel,
+                    None,
+                    &format!("Goal stopped after {run} Runs (max {MAX_GOAL_RUNS}) · {condition}"),
+                )
+                .await;
+                return;
+            }
+            GoalDecision::Continue { message, .. } => {
+                let handle = session.run(UserTurn::text(message)).await;
+                match render_run(ctx, None, output_channel, handle).await {
+                    // A `saku stop` aborts the Run and clears the Goal; end the loop.
+                    Ok(render) if render.aborted => return,
+                    Ok(_) => {}
+                    Err(err) => {
+                        warn!("goal run render failed: {err}");
+                        return;
+                    }
+                }
+            }
         }
-
-        if answer.trim().is_empty() {
-            answer = "(no assistant text)".into();
-        }
-        reply_chunks(ctx, output_channel, msg, &answer).await?;
-        react_ok(ctx, msg).await;
-        Ok(())
     }
 }
 
@@ -406,16 +558,36 @@ fn can_reference_trigger(output_channel: ChannelId, trigger_channel: ChannelId) 
     output_channel == trigger_channel
 }
 
-fn build_reply(
+/// Build a reply Message, tolerating the absence of a triggering Message
+/// (auto-continuation Goal Runs post without a reply reference).
+fn build_reply_opt(
     content: impl Into<String>,
     output_channel: ChannelId,
-    trigger: &Message,
+    trigger: Option<&Message>,
 ) -> CreateMessage {
     let mut message = CreateMessage::new().content(content);
-    if can_reference_trigger(output_channel, trigger.channel_id) {
+    if let Some(trigger) = trigger
+        && can_reference_trigger(output_channel, trigger.channel_id)
+    {
         message = message.reference_message(reply_reference(trigger));
     }
     message
+}
+
+/// Send `text` (chunked) to `channel_id`, referencing `reference` when present.
+async fn send_note(
+    ctx: &Context,
+    channel_id: ChannelId,
+    reference: Option<&Message>,
+    text: &str,
+) -> Result<(), String> {
+    for chunk in chunk_message(text) {
+        channel_id
+            .send_message(ctx, build_reply_opt(chunk, channel_id, reference))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 async fn reply_chunks(
@@ -424,13 +596,7 @@ async fn reply_chunks(
     msg: &Message,
     text: &str,
 ) -> Result<(), String> {
-    for chunk in chunk_message(text) {
-        channel_id
-            .send_message(ctx, build_reply(chunk, channel_id, msg))
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    send_note(ctx, channel_id, Some(msg), text).await
 }
 
 async fn react_ok(ctx: &Context, msg: &Message) {

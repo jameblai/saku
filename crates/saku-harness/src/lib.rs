@@ -31,7 +31,10 @@ pub use provider::{
     default_effort_for_model, fetch_codex_account_status, is_allowed_model, is_supported_effort,
     login_device_code, supported_efforts,
 };
-pub use session::{RunHandle, Session, SessionState, SessionStore};
+pub use session::{
+    Goal, GoalDecision, GoalDriverGuard, MAX_GOAL_RUNS, RunHandle, Session, SessionState,
+    SessionStore,
+};
 pub use status::{
     CodexAccountStatus, ModelRates, PlanWindow, RunState, StatusReport, WebBackendStatus,
     estimate_cost_usd, format_status,

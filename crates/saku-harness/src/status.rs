@@ -91,6 +91,8 @@ pub struct StatusReport {
     pub web_status: WebBackendStatus,
     /// Active Session Goal, if any (issue #50).
     pub goal: Option<crate::session::Goal>,
+    /// Loaded Project Context (`AGENTS.md`) paths for this Session Working Directory.
+    pub project_context_paths: Vec<PathBuf>,
 }
 
 /// Format a plain-text status reply (Discord-safe).
@@ -101,6 +103,14 @@ pub fn format_status(report: &StatusReport) -> String {
     out.push_str(&format!("Model: `{}`\n", report.model));
     out.push_str(&format!("Effort: `{}`\n", report.effort));
     out.push_str(&format!("Working Directory: `{}`\n", report.cwd.display()));
+    if report.project_context_paths.is_empty() {
+        out.push_str("Project Context: none\n");
+    } else {
+        out.push_str("Project Context:\n");
+        for path in &report.project_context_paths {
+            out.push_str(&format!("- `{}`\n", path.display()));
+        }
+    }
     match report.run_state {
         RunState::Running { waiting: 0 } => {
             out.push_str("Run state: running\n");
@@ -367,6 +377,7 @@ mod tests {
             web_backend: "exa".into(),
             web_status: WebBackendStatus::NoCredential,
             goal: None,
+            project_context_paths: Vec::new(),
         }
     }
 
@@ -389,6 +400,26 @@ mod tests {
     fn format_status_omits_goal_section_when_inactive() {
         let text = format_status(&sample_report());
         assert!(!text.contains("**Goal**"));
+    }
+
+    #[test]
+    fn format_status_shows_none_when_no_project_context() {
+        let text = format_status(&sample_report());
+        assert!(text.contains("Project Context: none\n"));
+    }
+
+    #[test]
+    fn format_status_lists_loaded_project_context_paths() {
+        let mut report = sample_report();
+        report.project_context_paths = vec![
+            PathBuf::from("/home/james/ws/AGENTS.md"),
+            PathBuf::from("/home/james/ws/crates/foo/AGENTS.md"),
+        ];
+        let text = format_status(&report);
+        assert!(text.contains("Project Context:\n"));
+        assert!(text.contains("- `/home/james/ws/AGENTS.md`\n"));
+        assert!(text.contains("- `/home/james/ws/crates/foo/AGENTS.md`\n"));
+        assert!(!text.contains("Project Context: none"));
     }
 
     #[test]

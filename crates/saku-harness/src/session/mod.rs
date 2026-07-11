@@ -21,8 +21,9 @@ use crate::compaction::{
 use crate::config::Effort;
 use crate::harness::HarnessInner;
 use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
-use crate::prompt::build_system_prompt;
+use crate::prompt::build_system_prompt_with_skills;
 use crate::provider::codex::models::{context_window_for, rates_for};
+use crate::skills::{LoadSkillsOptions, expand_skill_invocations, load_skills};
 use crate::status::{
     CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd,
 };
@@ -264,11 +265,17 @@ impl Session {
         if memory.chars().count() > MEMORY_CHAR_LIMIT {
             memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
         }
-        let system = build_system_prompt(
+        let skills = load_skills(LoadSkillsOptions {
+            cwd: &state.cwd,
+            workspace: &self.inner.workspace,
+            global_skills_dir: &self.inner.global_skills_dir,
+        });
+        let system = build_system_prompt_with_skills(
             &self.inner.workspace,
             &state.cwd,
             &memory,
             state.goal.as_ref().map(|g| g.condition.as_str()),
+            &skills.skills,
         );
         let estimated = estimate_tokens(&state.messages, &system) as u64;
         let (context_tokens, context_fill_percent) =
@@ -283,6 +290,8 @@ impl Session {
             .into_iter()
             .map(|d| d.name)
             .collect();
+        let mut skill_names: Vec<String> = skills.skills.iter().map(|s| s.name.clone()).collect();
+        skill_names.sort();
         StatusReport {
             model: state.model,
             effort: state.effort,
@@ -302,6 +311,7 @@ impl Session {
             background_running: bg_running,
             background_exited: bg_exited,
             tool_names,
+            skill_names,
             web_backend: self.inner.web_backend.clone(),
             web_status,
             goal: state.goal,
@@ -588,7 +598,7 @@ impl Session {
 
     async fn execute_run(
         &self,
-        turn: UserTurn,
+        mut turn: UserTurn,
         tx: mpsc::UnboundedSender<RunEvent>,
     ) -> Result<(), RunError> {
         let _ = tx.send(RunEvent::RunStarted);
@@ -599,6 +609,14 @@ impl Session {
                 .store
                 .append_run_started(&self.thread_id)
                 .map_err(|e| RunError::Store(e.to_string()))?;
+
+            // Expand `$skill-name` against skills for the current Working Directory.
+            let discovered = load_skills(LoadSkillsOptions {
+                cwd: &state.cwd,
+                workspace: &self.inner.workspace,
+                global_skills_dir: &self.inner.global_skills_dir,
+            });
+            turn.text = expand_skill_invocations(&turn.text, &discovered.skills);
         }
 
         {
@@ -624,11 +642,17 @@ impl Session {
                     memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
                 }
                 let goal_condition = state.goal.as_ref().map(|g| g.condition.clone());
-                let system_probe = build_system_prompt(
+                let round_skills = load_skills(LoadSkillsOptions {
+                    cwd: &state.cwd,
+                    workspace: &self.inner.workspace,
+                    global_skills_dir: &self.inner.global_skills_dir,
+                });
+                let system_probe = build_system_prompt_with_skills(
                     &self.inner.workspace,
                     &state.cwd,
                     &memory,
                     goal_condition.as_deref(),
+                    &round_skills.skills,
                 );
                 if estimate_tokens(&state.messages, &system_probe) > DEFAULT_COMPACTION_TOKEN_LIMIT
                     && let Some(result) = compact_messages(
@@ -678,8 +702,18 @@ impl Session {
             if memory.chars().count() > MEMORY_CHAR_LIMIT {
                 memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
             }
-            let system = build_system_prompt(&workspace, &cwd, &memory, goal_condition.as_deref());
-            let model_for_usage = model.clone();
+            let round_skills = load_skills(LoadSkillsOptions {
+                cwd: &cwd,
+                workspace: &workspace,
+                global_skills_dir: &self.inner.global_skills_dir,
+            });
+            let system = build_system_prompt_with_skills(
+                &workspace,
+                &cwd,
+                &memory,
+                goal_condition.as_deref(),
+                &round_skills.skills,
+            );            let model_for_usage = model.clone();
             let request = Request {
                 system,
                 messages,

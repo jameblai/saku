@@ -2,11 +2,24 @@
 
 use std::path::Path;
 
+use crate::skills::Skill;
+
 pub fn build_system_prompt(
     workspace: &Path,
     cwd: &Path,
     memory: &str,
     goal: Option<&str>,
+) -> String {
+    build_system_prompt_with_skills(workspace, cwd, memory, goal, &[])
+}
+
+/// Build the System Prompt, appending `<available_skills>` when `skills` is non-empty.
+pub fn build_system_prompt_with_skills(
+    workspace: &Path,
+    cwd: &Path,
+    memory: &str,
+    goal: Option<&str>,
+    skills: &[Skill],
 ) -> String {
     let mut prompt = String::new();
     prompt.push_str(
@@ -37,6 +50,14 @@ pub fn build_system_prompt(
     } else {
         prompt.push_str(memory);
         if !memory.ends_with('\n') {
+            prompt.push('\n');
+        }
+    }
+    let skills_block = crate::skills::format_skills_for_prompt(skills);
+    if !skills_block.is_empty() {
+        prompt.push('\n');
+        prompt.push_str(&skills_block);
+        if !skills_block.ends_with('\n') {
             prompt.push('\n');
         }
     }
@@ -104,5 +125,21 @@ mod tests {
     fn empty_memory_noted() {
         let text = build_system_prompt(&PathBuf::from("/w"), &PathBuf::from("/w"), "", None);
         assert!(text.contains("(empty)"));
+    }
+
+    #[test]
+    fn appends_available_skills_block() {
+        let skills = vec![crate::skills::Skill {
+            name: "triage".into(),
+            description: "Triage issues".into(),
+            file_path: PathBuf::from("/home/u/.agents/skills/triage/SKILL.md"),
+            base_dir: PathBuf::from("/home/u/.agents/skills/triage"),
+            disable_model_invocation: false,
+        }];
+        let text =
+            build_system_prompt_with_skills(Path::new("/ws"), Path::new("/ws"), "", None, &skills);
+        assert!(text.contains("<available_skills>"));
+        assert!(text.contains("<name>triage</name>"));
+        assert!(text.contains("Use the read tool"));
     }
 }

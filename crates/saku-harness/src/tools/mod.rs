@@ -68,6 +68,8 @@ pub struct ToolContext<'a> {
     pub workspace: &'a Path,
     pub cwd: PathBuf,
     pub data_dir: &'a Path,
+    /// Discovered Skill base directories allowlisted for `read` (and skill assets via bash).
+    pub skill_roots: Vec<PathBuf>,
     pub abort: watch::Receiver<bool>,
     /// Optional progress callback shape; Harness currently passes `None`.
     pub progress: Option<Box<dyn Fn(String) + Send + Sync + 'a>>,

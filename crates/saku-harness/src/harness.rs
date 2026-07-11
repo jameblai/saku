@@ -32,6 +32,7 @@ pub(crate) struct LiveSession {
 pub(crate) struct HarnessInner {
     pub workspace: PathBuf,
     pub data_dir: PathBuf,
+    pub global_skills_dir: PathBuf,
     pub default_model: String,
     pub default_effort: Effort,
     pub web_backend: String,
@@ -57,11 +58,20 @@ impl HarnessInner {
         };
         let abort = session.abort_tx.lock().await.subscribe();
         let cwd = session.snapshot().await.cwd;
+        let skill_roots = crate::skills::skill_base_dirs(
+            &crate::skills::load_skills(crate::skills::LoadSkillsOptions {
+                cwd: &cwd,
+                workspace: &self.workspace,
+                global_skills_dir: &self.global_skills_dir,
+            })
+            .skills,
+        );
         let ctx = ToolContext {
             session,
             workspace: &self.workspace,
             cwd,
             data_dir: &self.data_dir,
+            skill_roots,
             abort,
             progress: None,
         };
@@ -77,6 +87,15 @@ pub struct Harness {
 
 impl Harness {
     pub fn new(config: Config, provider: Arc<dyn Provider>) -> Result<Self, HarnessError> {
+        Self::with_global_skills_dir(config, provider, crate::skills::default_global_skills_dir())
+    }
+
+    /// Construct a Harness with an explicit global skills directory (tests / overrides).
+    pub fn with_global_skills_dir(
+        config: Config,
+        provider: Arc<dyn Provider>,
+        global_skills_dir: PathBuf,
+    ) -> Result<Self, HarnessError> {
         let store = SessionStore::open(&config.data_dir)?;
         let credentials = CredentialStore::open(&config.data_dir)?;
         let index = Arc::new(WorkspaceIndex::new(&config.workspace, &config.data_dir)?);
@@ -84,6 +103,7 @@ impl Harness {
             inner: Arc::new(HarnessInner {
                 workspace: config.workspace,
                 data_dir: config.data_dir,
+                global_skills_dir,
                 default_model: config.default_model,
                 default_effort: config.default_effort,
                 web_backend: config.web_backend,

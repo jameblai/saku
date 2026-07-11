@@ -25,6 +25,17 @@ pub fn resolve_in_workspace(
     cwd: &Path,
     candidate: impl AsRef<Path>,
 ) -> Result<PathBuf, PathError> {
+    resolve_in_workspace_or_allowlist(workspace, cwd, candidate, &[])
+}
+
+/// Like [`resolve_in_workspace`], but also allows paths under `allowlist_roots`
+/// (discovered Skill base directories for `read` / skill assets).
+pub fn resolve_in_workspace_or_allowlist(
+    workspace: &Path,
+    cwd: &Path,
+    candidate: impl AsRef<Path>,
+    allowlist_roots: &[PathBuf],
+) -> Result<PathBuf, PathError> {
     let candidate = candidate.as_ref();
     let joined = if candidate.is_absolute() {
         candidate.to_path_buf()
@@ -40,11 +51,20 @@ pub fn resolve_in_workspace(
             source,
         })?;
 
-    if !is_within(&canonical, &workspace_canon) {
-        return Err(PathError::OutsideWorkspace(canonical));
+    if is_within(&canonical, &workspace_canon) {
+        return Ok(canonical);
     }
 
-    Ok(canonical)
+    for root in allowlist_roots {
+        let Ok(root_canon) = root.canonicalize() else {
+            continue;
+        };
+        if is_within(&canonical, &root_canon) {
+            return Ok(canonical);
+        }
+    }
+
+    Err(PathError::OutsideWorkspace(canonical))
 }
 
 /// Canonicalize an existing path, or canonicalize its parent and append the final
@@ -101,6 +121,23 @@ mod tests {
         let (_tmp, workspace) = setup();
         let resolved = resolve_in_workspace(&workspace, &workspace, "file.txt").expect("inside");
         assert_eq!(resolved, workspace.join("file.txt").canonicalize().unwrap());
+    }
+
+    #[test]
+    fn allowlist_permits_skill_path_outside_workspace() {
+        let (_tmp, workspace) = setup();
+        let skill_dir = _tmp.path().join("skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        let skill_file = skill_dir.join("SKILL.md");
+        fs::write(&skill_file, "x").unwrap();
+        let resolved = resolve_in_workspace_or_allowlist(
+            &workspace,
+            &workspace,
+            &skill_file,
+            std::slice::from_ref(&skill_dir),
+        )
+        .expect("skill allowlisted");
+        assert_eq!(resolved, skill_file.canonicalize().unwrap());
     }
 
     #[test]

@@ -13,6 +13,7 @@ pub mod path;
 pub mod prompt;
 pub mod provider;
 pub mod session;
+pub mod skills;
 pub mod status;
 pub mod tools;
 pub mod types;
@@ -24,7 +25,7 @@ pub use config::{Config, ConfigError, Effort, ReleaseChannel};
 pub use credentials::{Credential, CredentialError, CredentialStore};
 pub use harness::{Harness, HarnessError};
 pub use memory::{MEMORY_CHAR_LIMIT, MemoryError, memory_path, read_memory, validate_memory_write};
-pub use path::{PathError, resolve_in_workspace};
+pub use path::{PathError, resolve_in_workspace, resolve_in_workspace_or_allowlist};
 pub use provider::{
     ALLOWED_MODELS, CODEX_PROVIDER_ID, CodexProvider, DeviceCodeInfo, FakeProvider, LoginError,
     LoginNotify, Provider, ProviderError, ScriptedResponse, create_codex_provider,
@@ -34,6 +35,11 @@ pub use provider::{
 pub use session::{
     Goal, GoalDecision, GoalDriverGuard, MAX_GOAL_RUNS, RunHandle, Session, SessionState,
     SessionStore,
+};
+pub use skills::{
+    LoadSkillsOptions, LoadSkillsResult, Skill, SkillDiagnostic, default_global_skills_dir,
+    expand_skill_invocations, format_skills_for_prompt, load_skills, load_skills_from_dir,
+    path_under_skill_dirs, skill_base_dirs,
 };
 pub use status::{
     CodexAccountStatus, ModelRates, PlanWindow, RunState, StatusReport, WebBackendStatus,

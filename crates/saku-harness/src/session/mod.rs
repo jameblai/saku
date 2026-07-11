@@ -1,5 +1,6 @@
 //! Session Store, Session, and RunHandle.
 
+mod search;
 mod store;
 
 use std::collections::VecDeque;
@@ -29,6 +30,7 @@ use crate::types::{
     Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, UserTurn,
 };
 
+pub use search::{DEFAULT_SEARCH_LIMIT, SearchError, SearchHit, SessionSearchIndex};
 pub use store::{SessionEntry, SessionHeader, SessionStore, StoreError};
 
 const MAX_TOOL_ROUNDS: usize = 90;
@@ -237,6 +239,7 @@ impl Session {
             tool_names,
             web_backend: self.inner.web_backend.clone(),
             web_status,
+            sessions_indexed: self.inner.search_index.session_count().unwrap_or(0),
         }
     }
 

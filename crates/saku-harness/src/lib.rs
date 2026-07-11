@@ -31,14 +31,17 @@ pub use provider::{
     default_effort_for_model, fetch_codex_account_status, is_allowed_model, is_supported_effort,
     login_device_code, supported_efforts,
 };
-pub use session::{RunHandle, Session, SessionState, SessionStore};
+pub use session::{
+    DEFAULT_SEARCH_LIMIT, RunHandle, SearchError, SearchHit, Session, SessionSearchIndex,
+    SessionState, SessionStore,
+};
 pub use status::{
     CodexAccountStatus, ModelRates, PlanWindow, RunState, StatusReport, WebBackendStatus,
     estimate_cost_usd, format_status,
 };
 pub use tools::{
     Tool, ToolError, ToolResult, background_tools, file_tools, memory_tools, register_web_tools,
-    search_tools, shell_tools, web_tools, web_tools_from_store,
+    search_tools, session_search_tools, shell_tools, web_tools, web_tools_from_store,
 };
 pub use types::{ContentPart, Message, Request, RunEvent, TokenUsage, UserTurn};
 pub use vision::{is_image_mime, is_image_path, resize_for_provider};

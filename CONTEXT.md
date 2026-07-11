@@ -57,7 +57,7 @@ _Avoid_: Run usage, parent usage, model usage
 
 
 **Subagent**:
-An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own ephemeral mini-transcript (task string only — no parent history), inherits Project Context / Memory / Skills, and returns only its summary to the parent transcript. Modes: `explore` (analysis tools, including policy-constrained bash; default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
+An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own ephemeral mini-transcript and Read Snapshots, inherits Project Context / Memory / Skills, and returns only its summary to the parent transcript; child messages and snapshots disappear when it finishes. Modes: `explore` (analysis tools, including policy-constrained bash; default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
 _Avoid_: Session, Background Process, delegate (as the tool name)
 
 
@@ -125,7 +125,7 @@ At most one active Run per Session. Additional messages in that Session wait (ho
 _Avoid_: global lock, job queue (as the product term)
 
 **Read Snapshot**:
-Record of a Workspace file’s identity (path + content hash/mtime) taken when `read` succeeds; lives for the whole Session. `edit` may only proceed if a matching snapshot exists and the file is unchanged. `write` may create a path that does not exist; if the path already exists, the same snapshot rule as `edit` applies.
+Record of a Workspace file’s identity (path + content hash/mtime) taken when `read` succeeds. Parent Run snapshots live for the whole Session; Subagent snapshots live only in that child loop and never authorize parent edits. `edit` may only proceed if a matching snapshot exists in its own scope and the file is unchanged. `write` may create a path that does not exist; if the path already exists, the same snapshot rule as `edit` applies.
 _Avoid_: lock, etag (as the domain term)
 
 **Session Store**:

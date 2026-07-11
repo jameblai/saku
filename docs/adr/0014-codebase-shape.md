@@ -47,7 +47,7 @@ Emitted on `RunHandle` for adapters and tests:
 ### Tool plug-in shape
 
 - Dynamic async `Tool` trait: `name`, `description`, `parameters_schema` (JSON Schema), `execute(ctx, args: serde_json::Value, abort) -> ToolResult`.
-- Shared `ToolContext`: Workspace root, Session Working Directory, Data Dir, Read Snapshots, progress callback, abort.
+- Shared `ToolContext`: Workspace root, Working Directory, Data Dir, the current Session- or Subagent-scoped Read Snapshots, progress callback, abort.
 - `ToolResult`: content parts for the model, `is_error`, optional structured `details` for adapters/logs (not necessarily sent to the model).
 - Tool failures become error tool results to the Provider (pi-style), not uncaught panics.
 

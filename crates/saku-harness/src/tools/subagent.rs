@@ -224,13 +224,17 @@ impl Tool for SubagentTool {
                         .await
                         .unwrap_or_else(|error| ToolResult::error(error.to_string()))
                 } else {
-                    ToolResult::error(
-                        format!(
-                            "tool `{}` is unavailable in {:?} mode",
-                            call.name, args.mode
-                        )
-                        .to_lowercase(),
+                    let mut message = format!(
+                        "tool `{}` is unavailable in {:?} mode",
+                        call.name, args.mode
                     )
+                    .to_lowercase();
+                    if args.mode == SubagentMode::Explore {
+                        message.push_str(
+                            "; do not retry through bash—report that an edit subagent is required",
+                        );
+                    }
+                    ToolResult::error(message)
                 };
                 messages.push(Message {
                     role: Role::Tool,

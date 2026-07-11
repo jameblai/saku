@@ -210,6 +210,37 @@ async fn explore_child_can_run_bash_without_leaking_inner_messages_to_parent_tra
 }
 
 #[tokio::test]
+async fn explore_child_is_told_not_to_retry_unavailable_mutation_through_bash() {
+    let tmp = TempDir::new().unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    fake.push_tool_calls(vec![tool_call(
+        "child",
+        "subagent",
+        json!({"task": "inspect only"}),
+    )]);
+    fake.push_tool_calls(vec![tool_call(
+        "edit",
+        "edit",
+        json!({"path": "x", "old_string": "a", "new_string": "b"}),
+    )]);
+    fake.push_text("reported limitation");
+    fake.push_text("parent done");
+    let harness = Harness::new(test_config(&tmp), fake.clone()).unwrap();
+    harness.register_default_tools().await;
+    let session = harness.session("explore-edit-error").await.unwrap();
+    let _ = session
+        .run(UserTurn::text("delegate"))
+        .await
+        .collect()
+        .await;
+
+    assert!(fake.requests()[2].messages.iter().any(|message| {
+        message.role == Role::Tool
+            && matches!(&message.content[0], ContentPart::Text { text } if text.contains("do not retry through bash") && text.contains("edit subagent is required"))
+    }));
+}
+
+#[tokio::test]
 async fn parallel_edit_batch_is_rejected_before_children_start() {
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());

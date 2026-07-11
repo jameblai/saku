@@ -27,7 +27,7 @@ fn test_config(tmp: &TempDir) -> Config {
 }
 
 #[tokio::test]
-async fn explore_subagent_has_isolated_task_and_read_only_tools_and_returns_summary() {
+async fn explore_subagent_has_isolated_task_and_analysis_tools_and_returns_summary() {
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
     fake.push_tool_calls(vec![tool_call(
@@ -62,8 +62,12 @@ async fn explore_subagent_has_isolated_task_and_read_only_tools_and_returns_summ
             .iter()
             .map(|tool| tool.name.as_str())
             .collect::<Vec<_>>(),
-        ["read", "cd", "find", "grep", "ls"]
+        ["read", "bash", "cd", "find", "grep", "ls"]
     );
+    assert!(child.system.contains("analysis-only"));
+    assert!(child.system.contains("do not retry through bash"));
+    assert!(!child.tools.iter().any(|tool| tool.name == "write"));
+    assert!(!child.tools.iter().any(|tool| tool.name == "edit"));
     assert!(!child.tools.iter().any(|tool| tool.name == "subagent"));
     assert!(requests[2].messages.iter().any(|message| {
         message.role == Role::Tool
@@ -158,6 +162,51 @@ async fn child_cd_is_local_to_the_subagent_and_applies_to_later_child_tools() {
         .await;
 
     assert_eq!(session.snapshot().await.cwd, workspace);
+}
+
+#[tokio::test]
+async fn explore_child_can_run_bash_without_leaking_inner_messages_to_parent_transcript() {
+    let tmp = TempDir::new().unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    fake.push_tool_calls(vec![tool_call(
+        "child",
+        "subagent",
+        json!({"task": "inspect git state"}),
+    )]);
+    fake.push_tool_calls(vec![tool_call(
+        "bash",
+        "bash",
+        json!({"command": "git status --short --branch 2>&1 || true"}),
+    )]);
+    fake.push_text("git inspection complete");
+    fake.push_text("parent done");
+    let harness = Harness::new(test_config(&tmp), fake.clone()).unwrap();
+    harness.register_default_tools().await;
+    let session = harness.session("explore-bash").await.unwrap();
+    let _ = session
+        .run(UserTurn::text("delegate"))
+        .await
+        .collect()
+        .await;
+
+    let child_follow_up = &fake.requests()[2];
+    assert!(child_follow_up.messages.iter().any(|message| {
+        message.role == Role::Tool
+            && matches!(&message.content[0], ContentPart::Text { text } if text.contains("not a git repository"))
+    }));
+
+    let parent = session.snapshot().await;
+    assert_eq!(parent.messages.len(), 4);
+    assert!(
+        !parent
+            .messages
+            .iter()
+            .any(|message| { message.tool_calls.iter().any(|call| call.name == "bash") })
+    );
+    assert!(parent.messages.iter().any(|message| {
+        message.role == Role::Tool
+            && matches!(&message.content[0], ContentPart::Text { text } if text == "git inspection complete")
+    }));
 }
 
 #[tokio::test]

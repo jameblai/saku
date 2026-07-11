@@ -57,7 +57,7 @@ _Avoid_: Run usage, parent usage, model usage
 
 
 **Subagent**:
-An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own mini-transcript (task string only — no parent history), inherits Project Context / Memory / Skills, and returns a summary to the parent. Modes: `explore` (read-only tools, default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
+An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own ephemeral mini-transcript (task string only — no parent history), inherits Project Context / Memory / Skills, and returns only its summary to the parent transcript. Modes: `explore` (analysis tools, including policy-constrained bash; default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
 _Avoid_: Session, Background Process, delegate (as the tool name)
 
 

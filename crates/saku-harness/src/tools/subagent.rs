@@ -12,7 +12,7 @@ use crate::provider::{ALLOWED_MODELS, is_allowed_model, is_supported_effort};
 use crate::types::{ContentPart, Message, ProviderEvent, Request, Role, ToolCall};
 
 const DEFAULT_MAX_TURNS: usize = 20;
-const EXPLORE_TOOLS: &[&str] = &["read", "find", "grep", "ls", "cd"];
+const EXPLORE_TOOLS: &[&str] = &["read", "find", "grep", "ls", "cd", "bash"];
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -134,6 +134,11 @@ impl Tool for SubagentTool {
             .collect::<Vec<_>>();
         let mut system = ctx.system_prompt.to_owned();
         system.push_str("\nYou are a Subagent. Complete only the supplied task, then return a concise summary to the parent. You have an isolated transcript. The subagent tool is unavailable; do not attempt to delegate.\n");
+        if args.mode == SubagentMode::Explore {
+            system.push_str(
+                "Explore mode is analysis-only. You may use bash to inspect state and run analysis scripts, but must not mutate files, use shell redirection to write, or bypass the unavailable write/edit tools. If a mutating tool is unavailable, do not retry through bash; report that the task requires an edit Subagent.\n",
+            );
+        }
         let mut messages = vec![Message::user_text(args.task)];
         let mut partial = String::new();
         let mut child_cwd = ctx.cwd.clone();

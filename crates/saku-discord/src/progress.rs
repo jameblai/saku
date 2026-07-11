@@ -14,6 +14,7 @@ pub fn tool_emoji(name: &str) -> &'static str {
         "ls" => "📁",
         "cd" => "📂",
         "bg_start" | "bg_list" | "bg_logs" | "bg_stop" => "🧵",
+        "subagent" => "🕵️",
         _ => "🛠️",
     }
 }
@@ -21,7 +22,20 @@ pub fn tool_emoji(name: &str) -> &'static str {
 pub fn args_preview(args: &Value) -> String {
     let raw = match args {
         Value::Object(map) => {
-            if let Some(cmd) = map.get("command").and_then(|v| v.as_str()) {
+            if let Some(task) = map.get("task").and_then(|v| v.as_str()) {
+                let mode = map
+                    .get("mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("explore");
+                let batch = match (
+                    map.get("_batch_position").and_then(|v| v.as_u64()),
+                    map.get("_batch_size").and_then(|v| v.as_u64()),
+                ) {
+                    (Some(position), Some(size)) => format!(" ({position}/{size})"),
+                    _ => String::new(),
+                };
+                format!("{mode}{batch} · {task}")
+            } else if let Some(cmd) = map.get("command").and_then(|v| v.as_str()) {
                 cmd.to_string()
             } else if let Some(path) = map.get("path").and_then(|v| v.as_str()) {
                 path.to_string()
@@ -137,6 +151,19 @@ mod tests {
         assert_eq!(tool_emoji("memory"), "🧠");
         let text = format_progress(&[("memory".into(), "`prefers cargo`".into())]);
         assert!(text.starts_with("🧠 memory:"));
+    }
+
+    #[test]
+    fn subagent_progress_shows_mode_batch_position_and_task() {
+        assert_eq!(
+            args_preview(&json!({
+                "task": "map skills loading",
+                "mode": "explore",
+                "_batch_position": 2,
+                "_batch_size": 4
+            })),
+            "`explore (2/4) · map skills loading`"
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use futures::StreamExt;
+use futures::future::join_all;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, mpsc, watch};
 
@@ -30,7 +31,8 @@ use crate::status::{
     CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd,
 };
 use crate::types::{
-    Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, ToolDefinition, UserTurn,
+    Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, ToolDefinition,
+    UsageBySource, UsageRecord, UsageSource, UserTurn,
 };
 
 pub use search::{DEFAULT_SEARCH_LIMIT, SearchError, SearchHit, SessionSearchIndex};
@@ -96,10 +98,36 @@ pub struct SessionState {
     pub run_count: u64,
     pub usage: TokenUsage,
     pub estimated_cost_usd: f64,
+    pub usage_by_source: UsageBySource,
+    pub usage_records: Vec<UsageRecord>,
     /// Last Provider-reported prompt tokens (for context fill).
     pub last_prompt_tokens: Option<u64>,
     /// Active Session Goal, if any (issue #50).
     pub goal: Option<Goal>,
+}
+
+impl SessionState {
+    /// Fold one Provider turn's usage into the aggregate totals, per-source
+    /// breakdown, and record log. Cost is derived from `model`'s current rates.
+    /// Shared by the live Run path and Session Store replay so the two never drift.
+    pub(crate) fn apply_usage(&mut self, source: UsageSource, model: String, delta: TokenUsage) {
+        let cost_usd = rates_for(&model)
+            .map(|rates| estimate_cost_usd(&delta, &rates))
+            .unwrap_or(0.0);
+        self.usage.add_assign(&delta);
+        self.estimated_cost_usd += cost_usd;
+        let source_usage = self.usage_by_source.get_mut(source);
+        source_usage.tokens.add_assign(&delta);
+        source_usage.estimated_cost_usd += cost_usd;
+        self.usage_records.push(UsageRecord {
+            source,
+            model,
+            tokens: delta,
+        });
+        if source == UsageSource::Run {
+            self.last_prompt_tokens = Some(delta.prompt_tokens());
+        }
+    }
 }
 
 /// Record of a file read for optimistic edits.
@@ -108,6 +136,28 @@ pub struct ReadSnapshot {
     pub path: PathBuf,
     pub hash: String,
     pub mtime_secs: i64,
+}
+
+impl ReadSnapshot {
+    pub(crate) fn capture(path: &Path) -> Result<Self, String> {
+        let (hash, mtime_secs) = file_fingerprint(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            hash,
+            mtime_secs,
+        })
+    }
+
+    pub(crate) fn assert_fresh(&self) -> Result<(), String> {
+        let (hash, mtime_secs) = file_fingerprint(&self.path)?;
+        if hash != self.hash || mtime_secs != self.mtime_secs {
+            return Err(format!(
+                "file changed since last read: {}",
+                self.path.display()
+            ));
+        }
+        Ok(())
+    }
 }
 
 struct QueuedRun {
@@ -168,12 +218,7 @@ impl Session {
 
     /// Record a Read Snapshot for `path` (fingerprint + Session Store append).
     pub async fn record_read_snapshot(&self, path: &Path) -> Result<(), String> {
-        let (hash, mtime_secs) = file_fingerprint(path)?;
-        let snapshot = ReadSnapshot {
-            path: path.to_path_buf(),
-            hash,
-            mtime_secs,
-        };
+        let snapshot = ReadSnapshot::capture(path)?;
         {
             let mut state = self.state.lock().await;
             if let Some(existing) = state
@@ -201,11 +246,7 @@ impl Session {
                 path.display()
             ));
         };
-        let (hash, mtime_secs) = file_fingerprint(path)?;
-        if hash != snap.hash || mtime_secs != snap.mtime_secs {
-            return Err(format!("file changed since last read: {}", path.display()));
-        }
-        Ok(())
+        snap.assert_fresh()
     }
 
     /// Idle / running / queued depth for `status`.
@@ -306,6 +347,7 @@ impl Session {
             run_count: state.run_count,
             usage: state.usage,
             estimated_cost_usd: state.estimated_cost_usd,
+            usage_by_source: state.usage_by_source,
             context_fill_percent,
             context_tokens,
             context_window: window,
@@ -488,6 +530,11 @@ impl Session {
                     verdict = Some((met, reason));
                 }
                 Ok(ProviderEvent::MessageComplete) => break,
+                Ok(ProviderEvent::Usage(usage)) => {
+                    self.record_usage(UsageSource::GoalEvaluator, GOAL_EVALUATOR_MODEL, usage)
+                        .await
+                        .map_err(RunError::Store)?;
+                }
                 Ok(ProviderEvent::Error(message)) => return Err(RunError::Evaluator(message)),
                 Err(err) => return Err(RunError::Evaluator(err.to_string())),
                 _ => {}
@@ -724,21 +771,25 @@ impl Session {
                 goal_condition.as_deref(),
                 &round_skills.skills,
             );
-            let model_for_usage = model.clone();
             let request = Request {
-                system,
+                system: system.clone(),
                 messages,
                 tools,
-                model,
+                model: model.clone(),
                 effort,
             };
 
             let mut stream = self.inner.provider.complete(request);
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
-            let mut turn_usage: Option<TokenUsage> = None;
 
             while let Some(item) = stream.next().await {
+                if let Ok(ProviderEvent::Usage(usage)) = item {
+                    self.record_usage(UsageSource::Run, &model, usage)
+                        .await
+                        .map_err(RunError::Store)?;
+                    continue;
+                }
                 if self.is_aborted().await {
                     let _ = tx.send(RunEvent::RunAborted);
                     return Ok(());
@@ -762,9 +813,7 @@ impl Session {
                             arguments,
                         });
                     }
-                    Ok(ProviderEvent::Usage(usage)) => {
-                        turn_usage = Some(usage);
-                    }
+                    Ok(ProviderEvent::Usage(_)) => unreachable!("usage handled above"),
                     Ok(ProviderEvent::MessageComplete) => break,
                     Ok(ProviderEvent::Error(message)) => {
                         let _ = tx.send(RunEvent::RunError { message });
@@ -777,10 +826,6 @@ impl Session {
                         return Ok(());
                     }
                 }
-            }
-
-            if let Some(usage) = turn_usage {
-                self.record_usage(&model_for_usage, usage).await?;
             }
 
             if !assistant_text.is_empty() || !tool_calls.is_empty() {
@@ -810,7 +855,7 @@ impl Session {
                 return Ok(());
             }
 
-            self.execute_tools(&tool_calls, &tx).await?;
+            self.execute_tools(&tool_calls, &system, &tx).await?;
             if self.is_aborted().await {
                 let _ = tx.send(RunEvent::RunAborted);
                 return Ok(());
@@ -842,8 +887,52 @@ impl Session {
     async fn execute_tools(
         &self,
         calls: &[ToolCall],
+        system_prompt: &str,
         tx: &mpsc::UnboundedSender<RunEvent>,
     ) -> Result<(), RunError> {
+        match self.inner.tool_batch_policy(calls).await {
+            crate::tools::ToolBatchPolicy::Reject(message) => {
+                for (index, call) in calls.iter().enumerate() {
+                    let _ = tx.send(RunEvent::ToolStarted {
+                        name: call.name.clone(),
+                        args: batch_progress_args(call, index, calls.len()),
+                    });
+                    self.record_tool_result(
+                        call,
+                        Ok(crate::tools::ToolResult::error(&message)),
+                        tx,
+                    )
+                    .await?;
+                }
+                return Ok(());
+            }
+            crate::tools::ToolBatchPolicy::Concurrent { max } => {
+                for chunk in calls.chunks(max.max(1)) {
+                    for call in chunk {
+                        let index = calls
+                            .iter()
+                            .position(|candidate| candidate.id == call.id)
+                            .unwrap_or(0);
+                        let _ = tx.send(RunEvent::ToolStarted {
+                            name: call.name.clone(),
+                            args: batch_progress_args(call, index, calls.len()),
+                        });
+                    }
+                    let results = join_all(
+                        chunk
+                            .iter()
+                            .map(|call| self.inner.execute_tool(self, call, system_prompt)),
+                    )
+                    .await;
+                    for (call, result) in chunk.iter().zip(results) {
+                        self.record_tool_result(call, result, tx).await?;
+                    }
+                }
+                return Ok(());
+            }
+            crate::tools::ToolBatchPolicy::Sequential => {}
+        }
+
         for call in calls {
             if self.is_aborted().await {
                 return Ok(());
@@ -853,52 +942,74 @@ impl Session {
                 args: call.arguments.clone(),
             });
             tokio::task::yield_now().await;
-            let result = self.inner.execute_tool(self, call).await;
-            let ok = result.as_ref().map(|r| !r.is_error).unwrap_or(false);
-            let tool_message = match result {
-                Ok(r) => Message {
-                    role: Role::Tool,
-                    content: r.content,
-                    tool_call_id: Some(call.id.clone()),
-                    tool_calls: Vec::new(),
-                },
-                Err(err) => Message {
-                    role: Role::Tool,
-                    content: vec![crate::types::ContentPart::text(err.to_string())],
-                    tool_call_id: Some(call.id.clone()),
-                    tool_calls: Vec::new(),
-                },
-            };
-            {
-                let mut state = self.state.lock().await;
-                state.messages.push(tool_message.clone());
-            }
-            self.inner
-                .store
-                .append_message(&self.thread_id, &tool_message)
-                .map_err(|e| RunError::Store(e.to_string()))?;
-            let _ = tx.send(RunEvent::ToolFinished {
-                name: call.name.clone(),
-                ok,
-            });
+            let result = self.inner.execute_tool(self, call, system_prompt).await;
+            self.record_tool_result(call, result, tx).await?;
         }
         Ok(())
     }
 
-    async fn record_usage(&self, model: &str, usage: TokenUsage) -> Result<(), RunError> {
-        let cost = rates_for(model)
-            .map(|rates| estimate_cost_usd(&usage, &rates))
-            .unwrap_or(0.0);
+    async fn record_tool_result(
+        &self,
+        call: &ToolCall,
+        result: Result<crate::tools::ToolResult, crate::tools::ToolError>,
+        tx: &mpsc::UnboundedSender<RunEvent>,
+    ) -> Result<(), RunError> {
+        if let Err(crate::tools::ToolError::Fatal(message)) = &result {
+            return Err(RunError::Store(message.clone()));
+        }
+        let ok = result.as_ref().map(|r| !r.is_error).unwrap_or(false);
+        let tool_message = match result {
+            Ok(r) => Message {
+                role: Role::Tool,
+                content: r.content,
+                tool_call_id: Some(call.id.clone()),
+                tool_calls: Vec::new(),
+            },
+            Err(err) => Message {
+                role: Role::Tool,
+                content: vec![crate::types::ContentPart::text(err.to_string())],
+                tool_call_id: Some(call.id.clone()),
+                tool_calls: Vec::new(),
+            },
+        };
+        {
+            let mut state = self.state.lock().await;
+            state.messages.push(tool_message.clone());
+        }
         self.inner
             .store
-            .append_usage(&self.thread_id, &usage, cost)
+            .append_message(&self.thread_id, &tool_message)
             .map_err(|e| RunError::Store(e.to_string()))?;
-        let mut state = self.state.lock().await;
-        state.usage.add_assign(&usage);
-        state.estimated_cost_usd += cost;
-        state.last_prompt_tokens = Some(usage.prompt_tokens());
+        let _ = tx.send(RunEvent::ToolFinished {
+            name: call.name.clone(),
+            ok,
+        });
         Ok(())
     }
+
+    pub(crate) async fn record_usage(
+        &self,
+        source: UsageSource,
+        model: &str,
+        usage: TokenUsage,
+    ) -> Result<(), String> {
+        self.inner
+            .store
+            .append_usage(&self.thread_id, source, model, &usage)
+            .map_err(|e| e.to_string())?;
+        let mut state = self.state.lock().await;
+        state.apply_usage(source, model.into(), usage);
+        Ok(())
+    }
+}
+
+fn batch_progress_args(call: &ToolCall, index: usize, total: usize) -> serde_json::Value {
+    let mut args = call.arguments.clone();
+    if let Some(object) = args.as_object_mut() {
+        object.insert("_batch_position".into(), serde_json::json!(index + 1));
+        object.insert("_batch_size".into(), serde_json::json!(total));
+    }
+    args
 }
 
 fn context_fill_for(

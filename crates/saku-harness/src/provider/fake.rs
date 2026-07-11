@@ -21,6 +21,10 @@ pub enum ScriptedResponse {
     },
     /// Emit tool calls (arguments as JSON values) then complete.
     ToolCalls(Vec<ToolCall>),
+    ToolCallsWithUsage {
+        calls: Vec<ToolCall>,
+        usage: crate::types::TokenUsage,
+    },
     /// Fail the completion.
     Error(String),
 }
@@ -58,6 +62,14 @@ impl FakeProvider {
 
     pub fn push_tool_calls(&self, calls: Vec<ToolCall>) {
         self.push(ScriptedResponse::ToolCalls(calls));
+    }
+
+    pub fn push_tool_calls_with_usage(
+        &self,
+        calls: Vec<ToolCall>,
+        usage: crate::types::TokenUsage,
+    ) {
+        self.push(ScriptedResponse::ToolCallsWithUsage { calls, usage });
     }
 
     pub fn requests(&self) -> Vec<Request> {
@@ -100,6 +112,19 @@ impl Provider for FakeProvider {
                         arguments: call.arguments,
                     }));
                 }
+                out.push(Ok(ProviderEvent::MessageComplete));
+                out
+            }
+            Some(ScriptedResponse::ToolCallsWithUsage { calls, usage }) => {
+                let mut out = Vec::new();
+                for call in calls {
+                    out.push(Ok(ProviderEvent::ToolCall {
+                        id: call.id,
+                        name: call.name,
+                        arguments: call.arguments,
+                    }));
+                }
+                out.push(Ok(ProviderEvent::Usage(usage)));
                 out.push(Ok(ProviderEvent::MessageComplete));
                 out
             }

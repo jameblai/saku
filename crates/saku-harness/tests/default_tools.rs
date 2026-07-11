@@ -64,6 +64,7 @@ async fn register_default_tools_registers_core_set() {
         "grep",
         "ls",
         "session_search",
+        "subagent",
     ];
     assert_eq!(report.tool_names, expected_core);
     // No Exa Credential in this test Data Dir → web Tools stay unregistered.

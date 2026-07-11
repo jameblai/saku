@@ -32,8 +32,7 @@ impl Tool for ReadTool {
         let path_arg = super::arg_string(&args, "path")?;
         let path = super::resolve_read_path(ctx.workspace, &ctx.cwd, &path_arg, &ctx.skill_roots)?;
         let bytes = std::fs::read(&path).map_err(|e| ToolError::Message(e.to_string()))?;
-        ctx.session
-            .record_read_snapshot(&path)
+        ctx.record_read_snapshot(&path)
             .await
             .map_err(ToolError::Message)?;
 

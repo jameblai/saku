@@ -41,8 +41,23 @@ One invocation of the Harness for a user message (or queued follow-up) until the
 _Avoid_: job, task, turn (turn = one LLM call inside a Run)
 
 
+**Usage Record**:
+One Provider-reported token measurement, attributed to its Usage Source and model. Persisted even when the enclosing operation later fails, is aborted, or reaches a limit; estimated currency cost is derived later and is not part of the record.
+_Avoid_: usage event, billing entry
+
+
+**Usage Source**:
+Which Session-owned Provider activity produced a Usage Record: parent Run, Subagent, or Goal Evaluator.
+_Avoid_: caller, origin, tool name
+
+
+**Session Usage**:
+The aggregate of every Usage Record caused by a Session, including parent Runs, Subagents, and Goal Evaluators. Headline status totals combine all sources; source attribution remains available as a breakdown.
+_Avoid_: Run usage, parent usage, model usage
+
+
 **Subagent**:
-An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own mini-transcript (task string only — no parent history), inherits Project Context / Memory / Skills, and returns a summary to the parent. Modes: `explore` (read-only tools, default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
+An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own ephemeral mini-transcript and Read Snapshots, inherits Project Context / Memory / Skills, and returns only its summary to the parent transcript; child messages and snapshots disappear when it finishes. Modes: `explore` (analysis tools, including policy-constrained bash; default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
 _Avoid_: Session, Background Process, delegate (as the tool name)
 
 
@@ -110,7 +125,7 @@ At most one active Run per Session. Additional messages in that Session wait (ho
 _Avoid_: global lock, job queue (as the product term)
 
 **Read Snapshot**:
-Record of a Workspace file’s identity (path + content hash/mtime) taken when `read` succeeds; lives for the whole Session. `edit` may only proceed if a matching snapshot exists and the file is unchanged. `write` may create a path that does not exist; if the path already exists, the same snapshot rule as `edit` applies.
+Record of a Workspace file’s identity (path + content hash/mtime) taken when `read` succeeds. Parent Run snapshots live for the whole Session; Subagent snapshots live only in that child loop and never authorize parent edits. `edit` may only proceed if a matching snapshot exists in its own scope and the file is unchanged. `write` may create a path that does not exist; if the path already exists, the same snapshot rule as `edit` applies.
 _Avoid_: lock, etag (as the domain term)
 
 **Session Store**:
@@ -182,4 +197,3 @@ _Avoid_: Memory, Skill, context file (generic)
 **Effort**:
 The reasoning/thinking level sent to the current model (pi’s thinking levels: e.g. `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` where the model supports it). Available values depend on the selected model. Chosen per Session; new Sessions take model/Effort defaults from `config.toml`.
 _Avoid_: thinking (as the user-facing command name), temperature
-

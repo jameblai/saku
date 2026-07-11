@@ -1,11 +1,12 @@
 //! Session status: Run count, usage persistence, run state.
 
+use std::io::Write;
 use std::sync::Arc;
 
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::FakeProvider;
 use saku_harness::status::RunState;
-use saku_harness::types::{RunEvent, TokenUsage, UserTurn};
+use saku_harness::types::{RunEvent, TokenUsage, UsageSource, UserTurn};
 use saku_harness::{CODEX_PROVIDER_ID, Harness, format_status};
 use tempfile::TempDir;
 
@@ -52,6 +53,11 @@ async fn run_count_and_usage_persist_across_replay() {
     assert_eq!(snap.usage.cache_read, 50);
     assert!(snap.estimated_cost_usd > 0.0);
     assert_eq!(snap.last_prompt_tokens, Some(150));
+    assert_eq!(snap.usage_by_source.run.tokens, snap.usage);
+    assert_eq!(snap.usage_records[0].source, UsageSource::Run);
+    assert_eq!(snap.usage_records[0].model, "gpt-5.5");
+    let jsonl = std::fs::read_to_string(tmp.path().join("data/sessions/status-1.jsonl")).unwrap();
+    assert!(!jsonl.contains("cost_usd"));
 
     // Drop in-memory session map by creating a new Harness on the same data dir.
     let harness2 = Harness::new(config(&tmp), Arc::new(FakeProvider::new())).unwrap();
@@ -62,6 +68,46 @@ async fn run_count_and_usage_persist_across_replay() {
     assert_eq!(snap2.usage.output, 20);
     assert_eq!(snap2.usage.cache_read, 50);
     assert!((snap2.estimated_cost_usd - snap.estimated_cost_usd).abs() < 1e-9);
+    assert_eq!(snap2.usage_by_source, snap.usage_by_source);
+    assert_eq!(snap2.usage_records, snap.usage_records);
+}
+
+#[tokio::test]
+async fn usage_without_source_replays_as_run_with_the_model_active_at_that_point() {
+    let tmp = TempDir::new().unwrap();
+    let cfg = config(&tmp);
+    let harness = Harness::new(cfg.clone(), Arc::new(FakeProvider::new())).unwrap();
+    let _ = harness.session("legacy-usage").await.unwrap();
+    let path = cfg.data_dir.join("sessions/legacy-usage.jsonl");
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(file, r#"{{"type":"model_change","model":"gpt-5.4-mini"}}"#).unwrap();
+    writeln!(
+        file,
+        r#"{{"type":"usage","input":7,"output":2,"cache_read":1,"cache_write":0}}"#
+    )
+    .unwrap();
+    writeln!(
+        file,
+        r#"{{"type":"usage","input":99,"output":1,"cache_read":0,"cache_write":0,"source":"subagent","model":"gpt-5.4-mini"}}"#
+    )
+    .unwrap();
+
+    let replay = Harness::new(cfg, Arc::new(FakeProvider::new())).unwrap();
+    let snapshot = replay
+        .session("legacy-usage")
+        .await
+        .unwrap()
+        .snapshot()
+        .await;
+    assert_eq!(snapshot.usage_records[0].source, UsageSource::Run);
+    assert_eq!(snapshot.usage_records[0].model, "gpt-5.4-mini");
+    assert!(
+        (snapshot.usage_by_source.run.estimated_cost_usd - 0.000014325).abs() < 1e-12,
+        "cost must be derived from current rates"
+    );
+    assert_eq!(snapshot.usage_by_source.run.tokens.input, 7);
+    assert_eq!(snapshot.usage_by_source.subagent.tokens.input, 99);
+    assert_eq!(snapshot.last_prompt_tokens, Some(8));
 }
 
 #[tokio::test]

@@ -5,6 +5,26 @@ use serde_json::Value;
 
 use crate::config::Effort;
 
+/// Session-owned Provider activity that produced a Usage Record.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsageSource {
+    #[default]
+    Run,
+    Subagent,
+    GoalEvaluator,
+}
+
+impl UsageSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Run => "Run",
+            Self::Subagent => "Subagents",
+            Self::GoalEvaluator => "Goal evaluator",
+        }
+    }
+}
+
 /// Multimodal content shared across turns, tool results, and Provider requests.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -142,6 +162,44 @@ impl TokenUsage {
     /// Prompt-side tokens useful for context fill (input + cache read + cache write).
     pub fn prompt_tokens(self) -> u64 {
         self.input + self.cache_read + self.cache_write
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UsageAggregate {
+    pub tokens: TokenUsage,
+    pub estimated_cost_usd: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UsageRecord {
+    pub source: UsageSource,
+    pub model: String,
+    pub tokens: TokenUsage,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UsageBySource {
+    pub run: UsageAggregate,
+    pub subagent: UsageAggregate,
+    pub goal_evaluator: UsageAggregate,
+}
+
+impl UsageBySource {
+    pub fn get_mut(&mut self, source: UsageSource) -> &mut UsageAggregate {
+        match source {
+            UsageSource::Run => &mut self.run,
+            UsageSource::Subagent => &mut self.subagent,
+            UsageSource::GoalEvaluator => &mut self.goal_evaluator,
+        }
+    }
+
+    pub fn entries(self) -> [(UsageSource, UsageAggregate); 3] {
+        [
+            (UsageSource::Run, self.run),
+            (UsageSource::Subagent, self.subagent),
+            (UsageSource::GoalEvaluator, self.goal_evaluator),
+        ]
     }
 }
 

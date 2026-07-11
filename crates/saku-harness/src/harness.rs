@@ -16,8 +16,9 @@ use crate::session::{
     new_run_control,
 };
 use crate::tools::{
-    Tool, ToolContext, ToolError, ToolRegistry, ToolResult, background_tools, file_tools,
-    memory_tools, register_web_tools, search_tools, session_search_tools, shell_tools,
+    SubagentTool, Tool, ToolBatchPolicy, ToolContext, ToolError, ToolRegistry, ToolResult,
+    background_tools, file_tools, memory_tools, register_web_tools, search_tools,
+    session_search_tools, shell_tools,
 };
 use crate::types::ToolCall;
 
@@ -47,10 +48,29 @@ pub(crate) struct HarnessInner {
 }
 
 impl HarnessInner {
+    pub async fn tool_batch_policy(&self, calls: &[ToolCall]) -> ToolBatchPolicy {
+        let Some(first) = calls.first() else {
+            return ToolBatchPolicy::Sequential;
+        };
+        if calls.iter().any(|call| call.name != first.name) {
+            return ToolBatchPolicy::Sequential;
+        }
+        let registry = self.tools.lock().await;
+        let Some(tool) = registry.get(&first.name) else {
+            return ToolBatchPolicy::Sequential;
+        };
+        let arguments = calls
+            .iter()
+            .map(|call| call.arguments.clone())
+            .collect::<Vec<_>>();
+        tool.batch_policy(&arguments)
+    }
+
     pub async fn execute_tool(
         &self,
         session: &Session,
         call: &ToolCall,
+        system_prompt: &str,
     ) -> Result<ToolResult, ToolError> {
         let tool = {
             let registry = self.tools.lock().await;
@@ -73,7 +93,9 @@ impl HarnessInner {
             workspace: &self.workspace,
             cwd,
             data_dir: &self.data_dir,
+            system_prompt,
             skill_roots,
+            local_read_snapshots: None,
             abort,
             progress: None,
         };
@@ -201,6 +223,7 @@ impl Harness {
             self.register_tool(tool).await;
         }
         register_web_tools(self).await;
+        self.register_tool(Arc::new(SubagentTool::new())).await;
     }
 
     /// Load or create a Session for `thread_id`.

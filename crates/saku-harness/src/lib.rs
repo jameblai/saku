@@ -10,6 +10,7 @@ pub mod harness;
 pub mod index;
 pub mod memory;
 pub mod path;
+pub mod project_context;
 pub mod prompt;
 pub mod provider;
 pub mod session;
@@ -26,6 +27,10 @@ pub use credentials::{Credential, CredentialError, CredentialStore};
 pub use harness::{Harness, HarnessError};
 pub use memory::{MEMORY_CHAR_LIMIT, MemoryError, memory_path, read_memory, validate_memory_write};
 pub use path::{PathError, resolve_in_workspace, resolve_in_workspace_or_allowlist};
+pub use project_context::{
+    ProjectContextFile, default_global_agents_path, format_project_context_block,
+    load_project_context,
+};
 pub use provider::{
     ALLOWED_MODELS, CODEX_PROVIDER_ID, CodexProvider, DeviceCodeInfo, FakeProvider, LoginError,
     LoginNotify, Provider, ProviderError, ScriptedResponse, create_codex_provider,

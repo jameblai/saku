@@ -173,3 +173,36 @@ async fn status_report_lists_registered_tools_in_order() {
     let text = format_status(&report);
     assert!(text.contains("`read` `edit` `write` `bash` `cd`"));
 }
+
+#[tokio::test]
+async fn status_report_lists_project_context_paths() {
+    let tmp = TempDir::new().unwrap();
+    let cfg = config(&tmp);
+    std::fs::write(cfg.workspace.join("AGENTS.md"), "ws norms").unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    let harness = Harness::new(cfg.clone(), fake).unwrap();
+    let session = harness.session("status-agents").await.unwrap();
+    let report = session
+        .status_report(
+            &cfg.default_model,
+            cfg.default_effort,
+            CODEX_PROVIDER_ID,
+            None,
+            None,
+            saku_harness::WebBackendStatus::NoCredential,
+        )
+        .await;
+    assert_eq!(
+        report
+            .project_context_paths
+            .iter()
+            .filter(|p| p.ends_with("AGENTS.md") && p.starts_with(&cfg.workspace))
+            .collect::<Vec<_>>(),
+        vec![&cfg.workspace.join("AGENTS.md")]
+    );
+    let text = format_status(&report);
+    assert!(text.contains(&format!(
+        "- `{}`",
+        cfg.workspace.join("AGENTS.md").display()
+    )));
+}

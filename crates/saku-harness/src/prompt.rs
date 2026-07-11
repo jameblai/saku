@@ -2,6 +2,10 @@
 
 use std::path::Path;
 
+use crate::project_context::{
+    ProjectContextFile, default_global_agents_path, format_project_context_block,
+    load_project_context,
+};
 use crate::skills::Skill;
 
 pub fn build_system_prompt(
@@ -13,13 +17,26 @@ pub fn build_system_prompt(
     build_system_prompt_with_skills(workspace, cwd, memory, goal, &[])
 }
 
-/// Build the System Prompt, appending `<available_skills>` when `skills` is non-empty.
+/// Build the System Prompt, appending Project Context and `<available_skills>` when present.
 pub fn build_system_prompt_with_skills(
     workspace: &Path,
     cwd: &Path,
     memory: &str,
     goal: Option<&str>,
     skills: &[Skill],
+) -> String {
+    let global = default_global_agents_path();
+    let context = load_project_context(workspace, cwd, global.as_deref());
+    build_system_prompt_with_context(workspace, cwd, memory, goal, skills, &context)
+}
+
+pub fn build_system_prompt_with_context(
+    workspace: &Path,
+    cwd: &Path,
+    memory: &str,
+    goal: Option<&str>,
+    skills: &[Skill],
+    project_context: &[ProjectContextFile],
 ) -> String {
     let mut prompt = String::new();
     prompt.push_str(
@@ -52,6 +69,9 @@ pub fn build_system_prompt_with_skills(
         if !memory.ends_with('\n') {
             prompt.push('\n');
         }
+    }
+    if let Some(block) = format_project_context_block(project_context) {
+        prompt.push_str(&block);
     }
     let skills_block = crate::skills::format_skills_for_prompt(skills);
     if !skills_block.is_empty() {
@@ -141,5 +161,35 @@ mod tests {
         assert!(text.contains("<available_skills>"));
         assert!(text.contains("<name>triage</name>"));
         assert!(text.contains("Use the read tool"));
+    }
+
+    #[test]
+    fn omits_project_context_when_none_loaded() {
+        let text =
+            build_system_prompt_with_context(Path::new("/ws"), Path::new("/ws"), "", None, &[], &[]);
+        assert!(!text.contains("<project_context>"));
+    }
+
+    #[test]
+    fn appends_project_context_after_memory() {
+        let files = vec![ProjectContextFile {
+            path: PathBuf::from("/ws/AGENTS.md"),
+            content: "prefer rust".into(),
+        }];
+        let text = build_system_prompt_with_context(
+            Path::new("/ws"),
+            Path::new("/ws"),
+            "likes tea",
+            None,
+            &[],
+            &files,
+        );
+        let memory_pos = text.find("# Memory").expect("memory");
+        let ctx_pos = text.find("<project_context>").expect("project context");
+        assert!(memory_pos < ctx_pos);
+        assert!(text.contains("likes tea"));
+        assert!(text.contains(
+            "<project_instructions path=\"/ws/AGENTS.md\">\nprefer rust\n</project_instructions>"
+        ));
     }
 }

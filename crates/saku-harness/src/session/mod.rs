@@ -21,6 +21,7 @@ use crate::compaction::{
 use crate::config::Effort;
 use crate::harness::HarnessInner;
 use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
+use crate::project_context::{default_global_agents_path, load_project_context};
 use crate::prompt::build_system_prompt_with_skills;
 use crate::provider::codex::models::{context_window_for, rates_for};
 use crate::skills::{LoadSkillsOptions, LoadSkillsResult, expand_skill_invocations, load_skills};
@@ -271,6 +272,10 @@ impl Session {
             global_skills_dir: &self.inner.global_skills_dir,
         });
         log_skill_diagnostics(&skills);
+        let global = default_global_agents_path();
+        let project_context =
+            load_project_context(&self.inner.workspace, &state.cwd, global.as_deref());
+        let project_context_paths = project_context.iter().map(|f| f.path.clone()).collect();
         let system = build_system_prompt_with_skills(
             &self.inner.workspace,
             &state.cwd,
@@ -316,6 +321,7 @@ impl Session {
             web_backend: self.inner.web_backend.clone(),
             web_status,
             goal: state.goal,
+            project_context_paths,
         }
     }
 

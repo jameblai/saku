@@ -716,7 +716,8 @@ impl Session {
                 &memory,
                 goal_condition.as_deref(),
                 &round_skills.skills,
-            );            let model_for_usage = model.clone();
+            );
+            let model_for_usage = model.clone();
             let request = Request {
                 system,
                 messages,

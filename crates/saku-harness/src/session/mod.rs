@@ -31,7 +31,8 @@ use crate::status::{
     CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd,
 };
 use crate::types::{
-    Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, ToolDefinition, UserTurn,
+    Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, ToolDefinition,
+    UsageBySource, UsageRecord, UsageSource, UserTurn,
 };
 
 pub use search::{DEFAULT_SEARCH_LIMIT, SearchError, SearchHit, SessionSearchIndex};
@@ -97,6 +98,8 @@ pub struct SessionState {
     pub run_count: u64,
     pub usage: TokenUsage,
     pub estimated_cost_usd: f64,
+    pub usage_by_source: UsageBySource,
+    pub usage_records: Vec<UsageRecord>,
     /// Last Provider-reported prompt tokens (for context fill).
     pub last_prompt_tokens: Option<u64>,
     /// Active Session Goal, if any (issue #50).
@@ -320,6 +323,7 @@ impl Session {
             run_count: state.run_count,
             usage: state.usage,
             estimated_cost_usd: state.estimated_cost_usd,
+            usage_by_source: state.usage_by_source,
             context_fill_percent,
             context_tokens,
             context_window: window,
@@ -502,6 +506,11 @@ impl Session {
                     verdict = Some((met, reason));
                 }
                 Ok(ProviderEvent::MessageComplete) => break,
+                Ok(ProviderEvent::Usage(usage)) => {
+                    self.record_usage(UsageSource::GoalEvaluator, GOAL_EVALUATOR_MODEL, usage)
+                        .await
+                        .map_err(RunError::Store)?;
+                }
                 Ok(ProviderEvent::Error(message)) => return Err(RunError::Evaluator(message)),
                 Err(err) => return Err(RunError::Evaluator(err.to_string())),
                 _ => {}
@@ -738,21 +747,25 @@ impl Session {
                 goal_condition.as_deref(),
                 &round_skills.skills,
             );
-            let model_for_usage = model.clone();
             let request = Request {
                 system: system.clone(),
                 messages,
                 tools,
-                model,
+                model: model.clone(),
                 effort,
             };
 
             let mut stream = self.inner.provider.complete(request);
             let mut assistant_text = String::new();
             let mut tool_calls: Vec<ToolCall> = Vec::new();
-            let mut turn_usage: Option<TokenUsage> = None;
 
             while let Some(item) = stream.next().await {
+                if let Ok(ProviderEvent::Usage(usage)) = item {
+                    self.record_usage(UsageSource::Run, &model, usage)
+                        .await
+                        .map_err(RunError::Store)?;
+                    continue;
+                }
                 if self.is_aborted().await {
                     let _ = tx.send(RunEvent::RunAborted);
                     return Ok(());
@@ -776,9 +789,7 @@ impl Session {
                             arguments,
                         });
                     }
-                    Ok(ProviderEvent::Usage(usage)) => {
-                        turn_usage = Some(usage);
-                    }
+                    Ok(ProviderEvent::Usage(_)) => unreachable!("usage handled above"),
                     Ok(ProviderEvent::MessageComplete) => break,
                     Ok(ProviderEvent::Error(message)) => {
                         let _ = tx.send(RunEvent::RunError { message });
@@ -791,10 +802,6 @@ impl Session {
                         return Ok(());
                     }
                 }
-            }
-
-            if let Some(usage) = turn_usage {
-                self.record_usage(&model_for_usage, usage).await?;
             }
 
             if !assistant_text.is_empty() || !tool_calls.is_empty() {
@@ -923,6 +930,9 @@ impl Session {
         result: Result<crate::tools::ToolResult, crate::tools::ToolError>,
         tx: &mpsc::UnboundedSender<RunEvent>,
     ) -> Result<(), RunError> {
+        if let Err(crate::tools::ToolError::Fatal(message)) = &result {
+            return Err(RunError::Store(message.clone()));
+        }
         let ok = result.as_ref().map(|r| !r.is_error).unwrap_or(false);
         let tool_message = match result {
             Ok(r) => Message {
@@ -953,18 +963,33 @@ impl Session {
         Ok(())
     }
 
-    async fn record_usage(&self, model: &str, usage: TokenUsage) -> Result<(), RunError> {
+    pub(crate) async fn record_usage(
+        &self,
+        source: UsageSource,
+        model: &str,
+        usage: TokenUsage,
+    ) -> Result<(), String> {
         let cost = rates_for(model)
             .map(|rates| estimate_cost_usd(&usage, &rates))
             .unwrap_or(0.0);
         self.inner
             .store
-            .append_usage(&self.thread_id, &usage, cost)
-            .map_err(|e| RunError::Store(e.to_string()))?;
+            .append_usage(&self.thread_id, source, model, &usage)
+            .map_err(|e| e.to_string())?;
         let mut state = self.state.lock().await;
         state.usage.add_assign(&usage);
         state.estimated_cost_usd += cost;
-        state.last_prompt_tokens = Some(usage.prompt_tokens());
+        let source_usage = state.usage_by_source.get_mut(source);
+        source_usage.tokens.add_assign(&usage);
+        source_usage.estimated_cost_usd += cost;
+        state.usage_records.push(UsageRecord {
+            source,
+            model: model.into(),
+            tokens: usage,
+        });
+        if source == UsageSource::Run {
+            state.last_prompt_tokens = Some(usage.prompt_tokens());
+        }
         Ok(())
     }
 }

@@ -11,6 +11,7 @@ use super::{Tool, ToolBatchPolicy, ToolContext, ToolError, ToolResult};
 use crate::config::Effort;
 use crate::path::resolve_in_workspace;
 use crate::provider::{ALLOWED_MODELS, is_allowed_model, is_supported_effort};
+use crate::types::UsageSource;
 use crate::types::{ContentPart, Message, ProviderEvent, Request, Role, ToolCall};
 
 const DEFAULT_MAX_TURNS: usize = 20;
@@ -176,7 +177,13 @@ impl Tool for SubagentTool {
                     }
                     ProviderEvent::MessageComplete => break,
                     ProviderEvent::Error(message) => return Ok(ToolResult::error(message)),
-                    ProviderEvent::ReasoningDelta(_) | ProviderEvent::Usage(_) => {}
+                    ProviderEvent::Usage(usage) => {
+                        ctx.session
+                            .record_usage(UsageSource::Subagent, &model, usage)
+                            .await
+                            .map_err(ToolError::Fatal)?;
+                    }
+                    ProviderEvent::ReasoningDelta(_) => {}
                 }
             }
             if !text.is_empty() {

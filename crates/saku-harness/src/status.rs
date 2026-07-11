@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::config::Effort;
-use crate::types::TokenUsage;
+use crate::types::{TokenUsage, UsageBySource};
 
 /// Whether a Session currently has an active or queued Run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +69,7 @@ pub struct StatusReport {
     pub run_count: u64,
     pub usage: TokenUsage,
     pub estimated_cost_usd: f64,
+    pub usage_by_source: UsageBySource,
     /// Context fill percent (0–100+), if computable.
     pub context_fill_percent: Option<f64>,
     pub context_tokens: Option<u64>,
@@ -136,6 +137,18 @@ pub fn format_status(report: &StatusReport) -> String {
         report.usage.input, report.usage.output, report.usage.cache_read, report.usage.cache_write
     ));
     out.push_str(&format!("Est. cost: ${:.4}\n", report.estimated_cost_usd));
+    let source_costs = report
+        .usage_by_source
+        .entries()
+        .into_iter()
+        .filter(|(_, aggregate)| aggregate.tokens != TokenUsage::default())
+        .map(|(source, aggregate)| {
+            format!("{} ${:.4}", source.label(), aggregate.estimated_cost_usd)
+        })
+        .collect::<Vec<_>>();
+    if !source_costs.is_empty() {
+        out.push_str(&format!("By source: {}\n", source_costs.join(" · ")));
+    }
 
     if let Some(goal) = &report.goal {
         out.push_str("\n**Goal**\n");
@@ -331,6 +344,7 @@ mod tests {
                 cache_write: 0,
             },
             estimated_cost_usd: 0.0123,
+            usage_by_source: UsageBySource::default(),
             context_fill_percent: Some(12.0),
             context_tokens: Some(34_000),
             context_window: Some(272_000),
@@ -385,6 +399,26 @@ mod tests {
             goal: None,
             project_context_paths: Vec::new(),
         }
+    }
+
+    #[test]
+    fn status_shows_compact_non_zero_usage_source_costs() {
+        let mut report = sample_report();
+        report.usage_by_source.run.estimated_cost_usd = 0.01;
+        report.usage_by_source.run.tokens.input = 1;
+        report.usage_by_source.subagent.estimated_cost_usd = 0.02;
+        report.usage_by_source.subagent.tokens.output = 1;
+        let text = format_status(&report);
+        assert!(text.contains("By source: Run $0.0100 · Subagents $0.0200"));
+        assert!(!text.contains("Goal evaluator $"));
+    }
+
+    #[test]
+    fn status_shows_token_bearing_source_even_when_cost_is_zero() {
+        let mut report = sample_report();
+        report.usage_by_source.subagent.tokens.input = 1;
+        let text = format_status(&report);
+        assert!(text.contains("By source: Subagents $0.0000"));
     }
 
     #[test]

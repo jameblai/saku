@@ -35,6 +35,8 @@ pub enum ToolError {
     Unknown(String),
     #[error("{0}")]
     Message(String),
+    #[error("{0}")]
+    Fatal(String),
 }
 
 #[derive(Debug, Clone)]

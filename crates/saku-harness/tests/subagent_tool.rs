@@ -4,7 +4,7 @@ use saku_harness::Harness;
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::FakeProvider;
 use saku_harness::provider::fake::tool_call;
-use saku_harness::types::{ContentPart, Role, RunEvent, UserTurn};
+use saku_harness::types::{ContentPart, Role, RunEvent, TokenUsage, UsageSource, UserTurn};
 use serde_json::json;
 use tempfile::TempDir;
 
@@ -117,7 +117,16 @@ async fn max_turns_returns_limit_notice_to_parent() {
         "subagent",
         json!({"task": "loop", "max_turns": 1}),
     )]);
-    fake.push_tool_calls(vec![tool_call("read", "read", json!({"path": "file.txt"}))]);
+    let child_usage = TokenUsage {
+        input: 12,
+        output: 3,
+        cache_read: 4,
+        cache_write: 0,
+    };
+    fake.push_tool_calls_with_usage(
+        vec![tool_call("read", "read", json!({"path": "file.txt"}))],
+        child_usage,
+    );
     fake.push_text("parent recovered");
     let harness = Harness::new(config, fake.clone()).unwrap();
     harness.register_default_tools().await;
@@ -133,6 +142,10 @@ async fn max_turns_returns_limit_notice_to_parent() {
         message.role == Role::Tool
             && matches!(&message.content[0], ContentPart::Text { text } if text.contains("max_turns=1"))
     }));
+    let snapshot = session.snapshot().await;
+    assert_eq!(snapshot.usage_by_source.subagent.tokens, child_usage);
+    assert_eq!(snapshot.usage_records[0].source, UsageSource::Subagent);
+    assert_eq!(snapshot.usage_records[0].model, "gpt-5.5");
 }
 
 #[tokio::test]

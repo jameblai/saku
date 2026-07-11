@@ -42,7 +42,7 @@ _Avoid_: job, task, turn (turn = one LLM call inside a Run)
 
 
 **Usage Record**:
-One Provider-reported token measurement, attributed to its Usage Source and model. Persisted even when the enclosing operation later fails, is aborted, or reaches a limit.
+One Provider-reported token measurement, attributed to its Usage Source and model. Persisted even when the enclosing operation later fails, is aborted, or reaches a limit; estimated currency cost is derived later and is not part of the record.
 _Avoid_: usage event, billing entry
 
 

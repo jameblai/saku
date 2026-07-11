@@ -9,9 +9,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::config::Effort;
+use crate::provider::rates_for;
 use crate::session::search::extract_text;
 use crate::session::{ReadSnapshot, SessionSearchIndex, SessionState};
-use crate::types::{Message, Role, TokenUsage};
+use crate::status::estimate_cost_usd;
+use crate::types::{Message, Role, TokenUsage, UsageBySource, UsageRecord, UsageSource};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -71,7 +73,13 @@ pub enum SessionEntry {
         output: u64,
         cache_read: u64,
         cache_write: u64,
-        cost_usd: f64,
+        /// Legacy persisted estimate; accepted on replay but never written.
+        #[serde(default, skip_serializing)]
+        cost_usd: Option<f64>,
+        #[serde(default)]
+        source: UsageSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
     /// A Goal was set (or replaced); resets the outer loop run count.
     GoalSet {
@@ -89,6 +97,7 @@ pub enum SessionEntry {
 #[derive(Clone)]
 pub struct SessionStore {
     sessions_dir: PathBuf,
+    append_lock: Arc<std::sync::Mutex<()>>,
     /// Session Search index kept incrementally in sync on every append.
     search_index: Option<Arc<SessionSearchIndex>>,
 }
@@ -99,6 +108,7 @@ impl SessionStore {
         fs::create_dir_all(&sessions_dir)?;
         Ok(Self {
             sessions_dir,
+            append_lock: Arc::new(std::sync::Mutex::new(())),
             search_index: None,
         })
     }
@@ -179,6 +189,8 @@ impl SessionStore {
                 run_count: 0,
                 usage: TokenUsage::default(),
                 estimated_cost_usd: 0.0,
+                usage_by_source: UsageBySource::default(),
+                usage_records: Vec::new(),
                 last_prompt_tokens: None,
                 goal: None,
             });
@@ -211,6 +223,8 @@ impl SessionStore {
             run_count: 0,
             usage: TokenUsage::default(),
             estimated_cost_usd: 0.0,
+            usage_by_source: UsageBySource::default(),
+            usage_records: Vec::new(),
             last_prompt_tokens: None,
             goal: None,
         };
@@ -273,7 +287,9 @@ impl SessionStore {
                     output,
                     cache_read,
                     cache_write,
-                    cost_usd,
+                    cost_usd: _,
+                    source,
+                    model,
                 } => {
                     let delta = TokenUsage {
                         input,
@@ -281,9 +297,23 @@ impl SessionStore {
                         cache_read,
                         cache_write,
                     };
+                    let model = model.unwrap_or_else(|| state.model.clone());
+                    let cost_usd = rates_for(&model)
+                        .map(|rates| estimate_cost_usd(&delta, &rates))
+                        .unwrap_or(0.0);
                     state.usage.add_assign(&delta);
                     state.estimated_cost_usd += cost_usd;
-                    state.last_prompt_tokens = Some(delta.prompt_tokens());
+                    let source_usage = state.usage_by_source.get_mut(source);
+                    source_usage.tokens.add_assign(&delta);
+                    source_usage.estimated_cost_usd += cost_usd;
+                    state.usage_records.push(UsageRecord {
+                        source,
+                        model,
+                        tokens: delta,
+                    });
+                    if source == UsageSource::Run {
+                        state.last_prompt_tokens = Some(delta.prompt_tokens());
+                    }
                 }
                 SessionEntry::GoalSet { condition } => {
                     state.goal = Some(crate::session::Goal {
@@ -391,8 +421,9 @@ impl SessionStore {
     pub fn append_usage(
         &self,
         thread_id: &str,
+        source: UsageSource,
+        model: &str,
         usage: &TokenUsage,
-        cost_usd: f64,
     ) -> Result<(), StoreError> {
         self.append(
             thread_id,
@@ -401,7 +432,9 @@ impl SessionStore {
                 output: usage.output,
                 cache_read: usage.cache_read,
                 cache_write: usage.cache_write,
-                cost_usd,
+                cost_usd: None,
+                source,
+                model: Some(model.into()),
             },
         )
     }
@@ -435,6 +468,10 @@ impl SessionStore {
     }
 
     fn append(&self, thread_id: &str, entry: &SessionEntry) -> Result<(), StoreError> {
+        let _guard = self
+            .append_lock
+            .lock()
+            .expect("session append lock poisoned");
         let path = self.path_for(thread_id);
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
         writeln!(file, "{}", serde_json::to_string(entry)?)?;

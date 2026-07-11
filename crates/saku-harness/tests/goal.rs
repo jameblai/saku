@@ -6,7 +6,7 @@ use std::sync::Arc;
 use saku_harness::config::{Config, Effort};
 use saku_harness::provider::FakeProvider;
 use saku_harness::provider::fake::tool_call;
-use saku_harness::types::UserTurn;
+use saku_harness::types::{TokenUsage, UsageSource, UserTurn};
 use saku_harness::{GoalDecision, Harness, MAX_GOAL_RUNS};
 use serde_json::json;
 use tempfile::TempDir;
@@ -86,7 +86,13 @@ async fn evaluator_continues_until_met() {
 async fn evaluator_uses_mini_model_low_effort_and_goal_check_tool() {
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());
-    fake.push_tool_calls(goal_check("e1", false, "not yet"));
+    let usage = TokenUsage {
+        input: 30,
+        output: 5,
+        cache_read: 10,
+        cache_write: 0,
+    };
+    fake.push_tool_calls_with_usage(goal_check("e1", false, "not yet"), usage);
     let harness = Harness::new(config(&tmp), fake.clone()).unwrap();
     let session = harness.session("g-model").await.unwrap();
 
@@ -108,6 +114,10 @@ async fn evaluator_uses_mini_model_low_effort_and_goal_check_tool() {
             ))),
         "condition included in evaluator prompt"
     );
+    let snapshot = session.snapshot().await;
+    assert_eq!(snapshot.usage_by_source.goal_evaluator.tokens, usage);
+    assert_eq!(snapshot.usage_records[0].source, UsageSource::GoalEvaluator);
+    assert_eq!(snapshot.usage_records[0].model, "gpt-5.4-mini");
 }
 
 #[tokio::test]

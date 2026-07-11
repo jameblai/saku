@@ -8,6 +8,31 @@ use saku_harness::provider::FakeProvider;
 use saku_harness::types::{RunEvent, UserTurn};
 use tempfile::TempDir;
 
+struct AbortUsageProvider {
+    started: Arc<tokio::sync::Notify>,
+    release_usage: Arc<tokio::sync::Notify>,
+}
+
+impl saku_harness::Provider for AbortUsageProvider {
+    fn complete(&self, _request: saku_harness::Request) -> saku_harness::provider::ProviderStream {
+        use futures::{StreamExt, stream};
+        use saku_harness::types::{ProviderEvent, TokenUsage};
+
+        self.started.notify_one();
+        let release = Arc::clone(&self.release_usage);
+        let usage = stream::once(async move {
+            release.notified().await;
+            Ok(ProviderEvent::Usage(TokenUsage {
+                input: 11,
+                output: 2,
+                cache_read: 3,
+                cache_write: 0,
+            }))
+        });
+        Box::pin(usage.chain(stream::iter([Ok(ProviderEvent::MessageComplete)])))
+    }
+}
+
 fn config(tmp: &TempDir) -> Config {
     let workspace = tmp.path().join("ws");
     let data_dir = tmp.path().join("data");
@@ -74,6 +99,27 @@ async fn stop_emits_run_aborted_for_active_run() {
         e,
         RunEvent::RunAborted | RunEvent::RunFinished | RunEvent::RunError { .. }
     )));
+}
+
+#[tokio::test]
+async fn abort_retains_usage_already_reported_by_provider() {
+    let tmp = TempDir::new().unwrap();
+    let provider = Arc::new(AbortUsageProvider {
+        started: Arc::new(tokio::sync::Notify::new()),
+        release_usage: Arc::new(tokio::sync::Notify::new()),
+    });
+    let harness = Harness::new(config(&tmp), provider.clone()).unwrap();
+    let session = harness.session("abort-usage").await.unwrap();
+    let handle = session.run(UserTurn::text("stop after usage")).await;
+    provider.started.notified().await;
+    session.stop().await;
+    provider.release_usage.notify_one();
+
+    let events = handle.collect().await;
+    assert!(events.contains(&RunEvent::RunAborted));
+    let snapshot = session.snapshot().await;
+    assert_eq!(snapshot.usage.input, 11);
+    assert_eq!(snapshot.usage.cache_read, 3);
 }
 
 /// After `stop` aborts a mid-tool Run, the next Run must be able to complete.

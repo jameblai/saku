@@ -305,7 +305,7 @@ fn parse_frontmatter(content: &str) -> (SkillFrontmatter, String) {
     };
     let yaml = &after_open[..end];
     let body = after_open[end + 4..].trim_start_matches('\n').to_string();
-    let frontmatter = serde_yaml::from_str::<SkillFrontmatter>(yaml).unwrap_or_default();
+    let frontmatter = serde_yml::from_str::<SkillFrontmatter>(yaml).unwrap_or_default();
     (frontmatter, body)
 }
 

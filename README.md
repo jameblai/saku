@@ -16,13 +16,13 @@
 ## Get running
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.1.0/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.2.0/scripts/install.sh | bash
 ```
 
 This installs a prebuilt Linux binary for x86_64 or aarch64, guides you through Setup, and starts a user systemd service. To use the nightly Release Channel instead, run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.1.0/scripts/install.sh | bash -s -- --channel nightly
+curl -fsSL https://raw.githubusercontent.com/jameblai/saku/v0.2.0/scripts/install.sh | bash -s -- --channel nightly
 ```
 
 Non-interactive installs deliver the binary only.

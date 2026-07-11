@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use futures::StreamExt;
+use futures::future::join_all;
 use sha2::{Digest, Sha256};
 use tokio::sync::{Mutex, mpsc, watch};
 
@@ -465,7 +466,7 @@ impl Session {
             let system = build_system_prompt(&workspace, &cwd, &memory);
             let model_for_usage = model.clone();
             let request = Request {
-                system,
+                system: system.clone(),
                 messages,
                 tools,
                 model,
@@ -549,7 +550,7 @@ impl Session {
                 return Ok(());
             }
 
-            self.execute_tools(&tool_calls, &tx).await?;
+            self.execute_tools(&tool_calls, &system, &tx).await?;
             if self.is_aborted().await {
                 let _ = tx.send(RunEvent::RunAborted);
                 return Ok(());
@@ -581,8 +582,52 @@ impl Session {
     async fn execute_tools(
         &self,
         calls: &[ToolCall],
+        system_prompt: &str,
         tx: &mpsc::UnboundedSender<RunEvent>,
     ) -> Result<(), RunError> {
+        match self.inner.tool_batch_policy(calls).await {
+            crate::tools::ToolBatchPolicy::Reject(message) => {
+                for (index, call) in calls.iter().enumerate() {
+                    let _ = tx.send(RunEvent::ToolStarted {
+                        name: call.name.clone(),
+                        args: batch_progress_args(call, index, calls.len()),
+                    });
+                    self.record_tool_result(
+                        call,
+                        Ok(crate::tools::ToolResult::error(&message)),
+                        tx,
+                    )
+                    .await?;
+                }
+                return Ok(());
+            }
+            crate::tools::ToolBatchPolicy::Concurrent { max } => {
+                for chunk in calls.chunks(max.max(1)) {
+                    for call in chunk {
+                        let index = calls
+                            .iter()
+                            .position(|candidate| candidate.id == call.id)
+                            .unwrap_or(0);
+                        let _ = tx.send(RunEvent::ToolStarted {
+                            name: call.name.clone(),
+                            args: batch_progress_args(call, index, calls.len()),
+                        });
+                    }
+                    let results = join_all(
+                        chunk
+                            .iter()
+                            .map(|call| self.inner.execute_tool(self, call, system_prompt)),
+                    )
+                    .await;
+                    for (call, result) in chunk.iter().zip(results) {
+                        self.record_tool_result(call, result, tx).await?;
+                    }
+                }
+                return Ok(());
+            }
+            crate::tools::ToolBatchPolicy::Sequential => {}
+        }
+
         for call in calls {
             if self.is_aborted().await {
                 return Ok(());
@@ -592,35 +637,45 @@ impl Session {
                 args: call.arguments.clone(),
             });
             tokio::task::yield_now().await;
-            let result = self.inner.execute_tool(self, call).await;
-            let ok = result.as_ref().map(|r| !r.is_error).unwrap_or(false);
-            let tool_message = match result {
-                Ok(r) => Message {
-                    role: Role::Tool,
-                    content: r.content,
-                    tool_call_id: Some(call.id.clone()),
-                    tool_calls: Vec::new(),
-                },
-                Err(err) => Message {
-                    role: Role::Tool,
-                    content: vec![crate::types::ContentPart::text(err.to_string())],
-                    tool_call_id: Some(call.id.clone()),
-                    tool_calls: Vec::new(),
-                },
-            };
-            {
-                let mut state = self.state.lock().await;
-                state.messages.push(tool_message.clone());
-            }
-            self.inner
-                .store
-                .append_message(&self.thread_id, &tool_message)
-                .map_err(|e| RunError::Store(e.to_string()))?;
-            let _ = tx.send(RunEvent::ToolFinished {
-                name: call.name.clone(),
-                ok,
-            });
+            let result = self.inner.execute_tool(self, call, system_prompt).await;
+            self.record_tool_result(call, result, tx).await?;
         }
+        Ok(())
+    }
+
+    async fn record_tool_result(
+        &self,
+        call: &ToolCall,
+        result: Result<crate::tools::ToolResult, crate::tools::ToolError>,
+        tx: &mpsc::UnboundedSender<RunEvent>,
+    ) -> Result<(), RunError> {
+        let ok = result.as_ref().map(|r| !r.is_error).unwrap_or(false);
+        let tool_message = match result {
+            Ok(r) => Message {
+                role: Role::Tool,
+                content: r.content,
+                tool_call_id: Some(call.id.clone()),
+                tool_calls: Vec::new(),
+            },
+            Err(err) => Message {
+                role: Role::Tool,
+                content: vec![crate::types::ContentPart::text(err.to_string())],
+                tool_call_id: Some(call.id.clone()),
+                tool_calls: Vec::new(),
+            },
+        };
+        {
+            let mut state = self.state.lock().await;
+            state.messages.push(tool_message.clone());
+        }
+        self.inner
+            .store
+            .append_message(&self.thread_id, &tool_message)
+            .map_err(|e| RunError::Store(e.to_string()))?;
+        let _ = tx.send(RunEvent::ToolFinished {
+            name: call.name.clone(),
+            ok,
+        });
         Ok(())
     }
 
@@ -638,6 +693,15 @@ impl Session {
         state.last_prompt_tokens = Some(usage.prompt_tokens());
         Ok(())
     }
+}
+
+fn batch_progress_args(call: &ToolCall, index: usize, total: usize) -> serde_json::Value {
+    let mut args = call.arguments.clone();
+    if let Some(object) = args.as_object_mut() {
+        object.insert("_batch_position".into(), serde_json::json!(index + 1));
+        object.insert("_batch_size".into(), serde_json::json!(total));
+    }
+    args
 }
 
 fn context_fill_for(

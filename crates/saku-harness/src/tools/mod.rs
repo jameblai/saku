@@ -5,6 +5,7 @@ pub mod file;
 pub mod memory;
 pub mod search;
 pub mod shell;
+pub mod subagent;
 pub mod web;
 
 use std::path::{Path, PathBuf};
@@ -23,6 +24,7 @@ pub use file::{EditTool, ReadTool, WriteTool, file_tools};
 pub use memory::{MemoryTool, memory_tools};
 pub use search::{FindTool, GrepTool, LsTool, search_tools};
 pub use shell::{BashTool, CdTool, shell_tools};
+pub use subagent::SubagentTool;
 pub use web::{register_web_tools, web_tools, web_tools_from_store};
 
 #[derive(Debug, Error)]
@@ -38,6 +40,13 @@ pub struct ToolResult {
     pub content: Vec<ContentPart>,
     pub is_error: bool,
     pub details: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolBatchPolicy {
+    Sequential,
+    Concurrent { max: usize },
+    Reject(String),
 }
 
 impl ToolResult {
@@ -68,6 +77,8 @@ pub struct ToolContext<'a> {
     pub workspace: &'a Path,
     pub cwd: PathBuf,
     pub data_dir: &'a Path,
+    /// Exact System Prompt used for the parent Provider turn.
+    pub system_prompt: &'a str,
     pub abort: watch::Receiver<bool>,
     /// Optional progress callback shape; Harness currently passes `None`.
     pub progress: Option<Box<dyn Fn(String) + Send + Sync + 'a>>,
@@ -79,6 +90,10 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     fn parameters_schema(&self) -> Value;
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError>;
+
+    fn batch_policy(&self, _arguments: &[Value]) -> ToolBatchPolicy {
+        ToolBatchPolicy::Sequential
+    }
 
     fn definition(&self) -> ToolDefinition {
         ToolDefinition {
@@ -109,5 +124,21 @@ impl ToolRegistry {
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.iter().find(|t| t.name() == name).cloned()
+    }
+
+    pub fn selected(&self, names: &[&str]) -> Vec<Arc<dyn Tool>> {
+        self.tools
+            .iter()
+            .filter(|tool| names.contains(&tool.name()))
+            .cloned()
+            .collect()
+    }
+
+    pub fn except(&self, excluded: &[&str]) -> Vec<Arc<dyn Tool>> {
+        self.tools
+            .iter()
+            .filter(|tool| !excluded.contains(&tool.name()))
+            .cloned()
+            .collect()
     }
 }

@@ -51,7 +51,7 @@ async fn register_default_tools_registers_core_set() {
 
     let expected_core = [
         "read", "edit", "write", "memory", "bash", "cd", "bg_start", "bg_list", "bg_logs",
-        "bg_stop", "find", "grep", "ls",
+        "bg_stop", "find", "grep", "ls", "subagent",
     ];
     assert_eq!(report.tool_names, expected_core);
     // No Exa Credential in this test Data Dir → web Tools stay unregistered.

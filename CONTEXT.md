@@ -78,7 +78,7 @@ The user-level systemd unit that keeps the `saku` binary running across logout; 
 _Avoid_: service (alone), daemon, Background Process
 
 **Release Channel**:
-Which delivery line Install or Update follows — **stable** (semver-tagged prebuilt releases, GitHub `latest`), **nightly** (automated prebuilt prereleases from `main`), or **git** (clone and compile `main` locally). Persisted in `config.toml` (default `stable`); `saku update` follows it. Changed only by editing config, not a CLI flag.
+Which published binary line Install or Update resolves — **stable** (semver-tagged releases, GitHub `latest`) or **nightly** (automated prereleases from `main`). Persisted in `config.toml` (default `stable`); `saku update` follows it. Changed only by editing config, not a CLI flag.
 _Avoid_: branch, track, version pin (as the product term)
 
 **Setup**:

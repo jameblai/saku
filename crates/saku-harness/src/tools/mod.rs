@@ -4,6 +4,7 @@ pub mod background;
 pub mod file;
 pub mod memory;
 pub mod search;
+pub mod session_search;
 pub mod shell;
 pub mod web;
 
@@ -22,6 +23,7 @@ pub use background::{BgListTool, BgLogsTool, BgStartTool, BgStopTool, background
 pub use file::{EditTool, ReadTool, WriteTool, file_tools};
 pub use memory::{MemoryTool, memory_tools};
 pub use search::{FindTool, GrepTool, LsTool, search_tools};
+pub use session_search::{SessionSearchTool, session_search_tools};
 pub use shell::{BashTool, CdTool, shell_tools};
 pub use web::{register_web_tools, web_tools, web_tools_from_store};
 

@@ -89,6 +89,8 @@ pub struct StatusReport {
     /// Configured Web Backend id (e.g. `exa`).
     pub web_backend: String,
     pub web_status: WebBackendStatus,
+    /// Sessions currently in the Session Search index.
+    pub sessions_indexed: usize,
     /// Active Session Goal, if any (issue #50).
     pub goal: Option<crate::session::Goal>,
     /// Loaded Project Context (`AGENTS.md`) paths for this Session Working Directory.
@@ -213,6 +215,9 @@ pub fn format_status(report: &StatusReport) -> String {
     } else {
         out.push_str("Plan Usage unavailable\n");
     }
+
+    out.push_str("\n**Session Search**\n");
+    out.push_str(&format!("Sessions indexed: {}\n", report.sessions_indexed));
 
     out.push_str("\n**Web Backend**\n");
     out.push_str(&format!("Backend: `{}`\n", report.web_backend));
@@ -376,6 +381,7 @@ mod tests {
             skill_names: vec!["triage".into()],
             web_backend: "exa".into(),
             web_status: WebBackendStatus::NoCredential,
+            sessions_indexed: 18,
             goal: None,
             project_context_paths: Vec::new(),
         }

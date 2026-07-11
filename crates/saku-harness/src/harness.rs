@@ -12,11 +12,12 @@ use crate::credentials::CredentialStore;
 use crate::index::{SharedIndex, WorkspaceIndex};
 use crate::provider::Provider;
 use crate::session::{
-    RunControl, Session, SessionState, SessionStore, StoreError, new_run_control,
+    RunControl, Session, SessionSearchIndex, SessionState, SessionStore, StoreError,
+    new_run_control,
 };
 use crate::tools::{
     Tool, ToolContext, ToolError, ToolRegistry, ToolResult, background_tools, file_tools,
-    memory_tools, register_web_tools, search_tools, shell_tools,
+    memory_tools, register_web_tools, search_tools, session_search_tools, shell_tools,
 };
 use crate::types::ToolCall;
 
@@ -40,6 +41,7 @@ pub(crate) struct HarnessInner {
     pub store: SessionStore,
     pub credentials: CredentialStore,
     pub index: SharedIndex,
+    pub search_index: Arc<SessionSearchIndex>,
     pub tools: Mutex<ToolRegistry>,
     pub sessions: Mutex<HashMap<String, LiveSession>>,
 }
@@ -96,7 +98,9 @@ impl Harness {
         provider: Arc<dyn Provider>,
         global_skills_dir: PathBuf,
     ) -> Result<Self, HarnessError> {
-        let store = SessionStore::open(&config.data_dir)?;
+        let search_index = Arc::new(SessionSearchIndex::open(&config.data_dir)?);
+        let store =
+            SessionStore::open(&config.data_dir)?.with_search_index(Arc::clone(&search_index));
         let credentials = CredentialStore::open(&config.data_dir)?;
         let index = Arc::new(WorkspaceIndex::new(&config.workspace, &config.data_dir)?);
         Ok(Self {
@@ -111,6 +115,7 @@ impl Harness {
                 store,
                 credentials,
                 index,
+                search_index,
                 tools: Mutex::new(ToolRegistry::new()),
                 sessions: Mutex::new(HashMap::new()),
             }),
@@ -119,6 +124,23 @@ impl Harness {
 
     pub fn index(&self) -> &SharedIndex {
         &self.inner.index
+    }
+
+    pub fn search_index(&self) -> &Arc<SessionSearchIndex> {
+        &self.inner.search_index
+    }
+
+    /// Rebuild the Session Search index from existing JSONL Sessions.
+    ///
+    /// Run at bot startup to migrate Sessions written before the index existed.
+    /// Returns the number of Sessions indexed. Blocking work runs off the async
+    /// runtime.
+    pub async fn reindex_sessions(&self) -> Result<usize, crate::session::SearchError> {
+        let search_index = Arc::clone(&self.inner.search_index);
+        let sessions_dir = self.inner.store.sessions_dir().to_path_buf();
+        tokio::task::spawn_blocking(move || search_index.reindex_all(&sessions_dir))
+            .await
+            .expect("reindex task panicked")
     }
 
     pub fn workspace(&self) -> &std::path::Path {
@@ -173,6 +195,9 @@ impl Harness {
             self.register_tool(tool).await;
         }
         for tool in search_tools(Arc::clone(self.index())) {
+            self.register_tool(tool).await;
+        }
+        for tool in session_search_tools(Arc::clone(self.search_index())) {
             self.register_tool(tool).await;
         }
         register_web_tools(self).await;
@@ -249,4 +274,6 @@ pub enum HarnessError {
     Credentials(#[from] crate::credentials::CredentialError),
     #[error(transparent)]
     Index(#[from] crate::index::IndexError),
+    #[error(transparent)]
+    Search(#[from] crate::session::SearchError),
 }

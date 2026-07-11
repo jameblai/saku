@@ -3,13 +3,15 @@
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::config::Effort;
-use crate::session::{ReadSnapshot, SessionState};
-use crate::types::{Message, TokenUsage};
+use crate::session::search::extract_text;
+use crate::session::{ReadSnapshot, SessionSearchIndex, SessionState};
+use crate::types::{Message, Role, TokenUsage};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -84,16 +86,32 @@ pub enum SessionEntry {
     GoalCleared,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SessionStore {
     sessions_dir: PathBuf,
+    /// Session Search index kept incrementally in sync on every append.
+    search_index: Option<Arc<SessionSearchIndex>>,
 }
 
 impl SessionStore {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self, StoreError> {
         let sessions_dir = data_dir.as_ref().join("sessions");
         fs::create_dir_all(&sessions_dir)?;
-        Ok(Self { sessions_dir })
+        Ok(Self {
+            sessions_dir,
+            search_index: None,
+        })
+    }
+
+    /// Attach a Session Search index; future appends keep it up to date.
+    pub fn with_search_index(mut self, index: Arc<SessionSearchIndex>) -> Self {
+        self.search_index = Some(index);
+        self
+    }
+
+    /// Directory holding per-thread `<thread_id>.jsonl` files.
+    pub fn sessions_dir(&self) -> &Path {
+        &self.sessions_dir
     }
 
     /// Thread ids of all persisted Sessions (one `<thread_id>.jsonl` per Session).
@@ -294,7 +312,19 @@ impl SessionStore {
                 tool_call_id: message.tool_call_id.clone(),
                 tool_calls: message.tool_calls.clone(),
             },
-        )
+        )?;
+        // Keep the Session Search index in sync: user/assistant text only.
+        if let Some(index) = &self.search_index
+            && matches!(message.role, Role::User | Role::Assistant)
+        {
+            let text = extract_text(&message.content);
+            if let Err(err) =
+                index.index_message(&self.path_for(thread_id), thread_id, message.role, &text)
+            {
+                eprintln!("session search index (message): {err}");
+            }
+        }
+        Ok(())
     }
 
     pub fn append_cwd(&self, thread_id: &str, cwd: &Path) -> Result<(), StoreError> {
@@ -345,7 +375,13 @@ impl SessionStore {
             &SessionEntry::Compaction {
                 summary: summary.into(),
             },
-        )
+        )?;
+        if let Some(index) = &self.search_index
+            && let Err(err) = index.index_compaction(&self.path_for(thread_id), thread_id, summary)
+        {
+            eprintln!("session search index (compaction): {err}");
+        }
+        Ok(())
     }
 
     pub fn append_run_started(&self, thread_id: &str) -> Result<(), StoreError> {

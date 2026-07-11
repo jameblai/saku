@@ -99,6 +99,14 @@ async fn run_bot_cmd(config: Option<PathBuf>) -> ExitCode {
     };
     harness.register_default_tools().await;
 
+    // Rebuild the Session Search index from existing JSONL Sessions (migrates
+    // Sessions written before the index existed). Best-effort: a failure here
+    // must not stop the bot from starting.
+    match harness.reindex_sessions().await {
+        Ok(n) => eprintln!("Session Search: indexed {n} sessions"),
+        Err(err) => eprintln!("Session Search reindex failed: {err}"),
+    }
+
     // Keep Arc alive for clarity; harness is Clone.
     let _ = Arc::new(());
 

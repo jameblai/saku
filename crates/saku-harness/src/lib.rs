@@ -35,8 +35,8 @@ pub use provider::{
     login_device_code, supported_efforts,
 };
 pub use session::{
-    Goal, GoalDecision, GoalDriverGuard, MAX_GOAL_RUNS, RunHandle, Session, SessionState,
-    SessionStore,
+    DEFAULT_SEARCH_LIMIT, Goal, GoalDecision, GoalDriverGuard, MAX_GOAL_RUNS, RunHandle,
+    SearchError, SearchHit, Session, SessionSearchIndex, SessionState, SessionStore,
 };
 pub use skills::{
     LoadSkillsOptions, LoadSkillsResult, Skill, SkillDiagnostic, default_global_skills_dir,
@@ -49,7 +49,7 @@ pub use status::{
 };
 pub use tools::{
     Tool, ToolError, ToolResult, background_tools, file_tools, memory_tools, register_web_tools,
-    search_tools, shell_tools, web_tools, web_tools_from_store,
+    search_tools, session_search_tools, shell_tools, web_tools, web_tools_from_store,
 };
 pub use types::{ContentPart, Message, Request, RunEvent, TokenUsage, UserTurn};
 pub use vision::{is_image_mime, is_image_path, resize_for_provider};

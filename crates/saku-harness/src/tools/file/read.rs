@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
-use super::{ok_text, resolve_tool_path};
+use super::ok_text;
 use crate::tools::{Tool, ToolContext, ToolError, ToolResult};
 
 pub struct ReadTool;
@@ -13,7 +13,8 @@ impl Tool for ReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file under the Workspace. Records a Read Snapshot for later edit/write."
+        "Read a file under the Workspace, or under a discovered Skill directory. \
+         Records a Read Snapshot for later edit/write when the path is in the Workspace."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -29,7 +30,7 @@ impl Tool for ReadTool {
 
     async fn execute(&self, ctx: &ToolContext<'_>, args: Value) -> Result<ToolResult, ToolError> {
         let path_arg = super::arg_string(&args, "path")?;
-        let path = resolve_tool_path(ctx.workspace, &ctx.cwd, &path_arg)?;
+        let path = super::resolve_read_path(ctx.workspace, &ctx.cwd, &path_arg, &ctx.skill_roots)?;
         let bytes = std::fs::read(&path).map_err(|e| ToolError::Message(e.to_string()))?;
         ctx.session
             .record_read_snapshot(&path)

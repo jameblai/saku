@@ -84,6 +84,8 @@ pub struct StatusReport {
     pub background_exited: usize,
     /// Tool names currently registered on the Harness (registration order).
     pub tool_names: Vec<String>,
+    /// Discovered Skill names for the Session Working Directory (sorted).
+    pub skill_names: Vec<String>,
     /// Configured Web Backend id (e.g. `exa`).
     pub web_backend: String,
     pub web_status: WebBackendStatus,
@@ -139,6 +141,20 @@ pub fn format_status(report: &StatusReport) -> String {
     out.push_str("\n**Tools**\n");
     if !report.tool_names.is_empty() {
         let names: Vec<String> = report.tool_names.iter().map(|n| format!("`{n}`")).collect();
+        out.push_str(&names.join(" "));
+        out.push('\n');
+    }
+
+    out.push_str("\n**Skills**\n");
+    if report.skill_names.is_empty() {
+        out.push_str("(none)\n");
+    } else {
+        out.push_str(&format!("{}: ", report.skill_names.len()));
+        let names: Vec<String> = report
+            .skill_names
+            .iter()
+            .map(|n| format!("`{n}`"))
+            .collect();
         out.push_str(&names.join(" "));
         out.push('\n');
     }
@@ -347,6 +363,7 @@ mod tests {
                 "bash".into(),
                 "web_search".into(),
             ],
+            skill_names: vec!["triage".into()],
             web_backend: "exa".into(),
             web_status: WebBackendStatus::NoCredential,
             goal: None,
@@ -402,9 +419,11 @@ mod tests {
         let text = format_status(&sample_report());
         let session_pos = text.find("**Session**").expect("Session");
         let tools_pos = text.find("**Tools**").expect("Tools");
+        let skills_pos = text.find("**Skills**").expect("Skills");
         let config_pos = text.find("**Config**").expect("Config");
-        assert!(session_pos < tools_pos && tools_pos < config_pos);
+        assert!(session_pos < tools_pos && tools_pos < skills_pos && skills_pos < config_pos);
         assert!(text.contains("`read` `edit` `write` `bash` `web_search`"));
+        assert!(text.contains("1: `triage`"));
     }
 
     #[test]

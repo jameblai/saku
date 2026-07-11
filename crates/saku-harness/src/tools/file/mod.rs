@@ -6,7 +6,7 @@ mod write;
 
 use std::path::{Path, PathBuf};
 
-use crate::path::{PathError, resolve_in_workspace};
+use crate::path::{PathError, resolve_in_workspace, resolve_in_workspace_or_allowlist};
 use crate::tools::{Tool, ToolError, ToolResult};
 
 pub use edit::EditTool;
@@ -27,6 +27,16 @@ pub(crate) fn resolve_tool_path(
     candidate: &str,
 ) -> Result<PathBuf, ToolError> {
     resolve_in_workspace(workspace, cwd, candidate).map_err(path_err)
+}
+
+/// Resolve a path for `read`, allowing discovered Skill directories outside the Workspace.
+pub(crate) fn resolve_read_path(
+    workspace: &Path,
+    cwd: &Path,
+    candidate: &str,
+    skill_roots: &[PathBuf],
+) -> Result<PathBuf, ToolError> {
+    resolve_in_workspace_or_allowlist(workspace, cwd, candidate, skill_roots).map_err(path_err)
 }
 
 fn path_err(err: PathError) -> ToolError {

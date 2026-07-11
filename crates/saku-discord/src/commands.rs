@@ -13,6 +13,10 @@ pub enum BotCommand {
         level: Option<String>,
     },
     Status,
+    /// `saku goal` (status) or `saku goal <condition>` (set/replace).
+    Goal {
+        condition: Option<String>,
+    },
     /// `saku bg` — list Background Processes.
     BgList,
     /// `saku bg logs <pid>`
@@ -54,6 +58,20 @@ pub fn parse_command(prefix: &str, content: &str) -> Option<BotCommand> {
         "effort" => {
             let level = parts.next().map(str::to_string);
             Some(BotCommand::Effort { level })
+        }
+        "goal" => {
+            // Everything after the `goal` token (case/whitespace preserved) is the condition.
+            let condition = rest
+                .split_once(char::is_whitespace)
+                .map(|(_, tail)| tail.trim())
+                .unwrap_or("");
+            Some(BotCommand::Goal {
+                condition: if condition.is_empty() {
+                    None
+                } else {
+                    Some(condition.to_string())
+                },
+            })
         }
         "bg" => parse_bg(rest),
         _ => None,
@@ -110,6 +128,8 @@ pub fn help_text(prefix: &str) -> String {
          - `{prefix} model` / `{prefix} model <id> [effort]`\n\
          - `{prefix} effort` / `{prefix} effort <level>`\n\
          - `{prefix} status` — Session, Tools, config, Codex Plan Usage, Web Backend\n\
+         - `{prefix} goal <condition>` — chain Runs until the condition is met (max 20)\n\
+         - `{prefix} goal` — show the active Goal\n\
          - `{prefix} bg` — list Background Processes\n\
          - `{prefix} bg logs <pid>` — tail Background Process logs\n\
          - `{prefix} bg stop <pid>` — stop one Background Process\n\
@@ -147,6 +167,34 @@ mod tests {
         assert!(text.contains("`saku status`"));
         assert!(text.contains("Tools"));
         assert!(text.contains("Web Backend"));
+    }
+
+    #[test]
+    fn parses_goal_status_and_set() {
+        assert_eq!(
+            parse_command("saku", "saku goal"),
+            Some(BotCommand::Goal { condition: None })
+        );
+        assert_eq!(
+            parse_command("saku", "saku goal cargo test green in crates/saku-harness"),
+            Some(BotCommand::Goal {
+                condition: Some("cargo test green in crates/saku-harness".into())
+            })
+        );
+        // Case-insensitive command token, condition case preserved.
+        assert_eq!(
+            parse_command("saku", "saku GOAL Make CI Pass"),
+            Some(BotCommand::Goal {
+                condition: Some("Make CI Pass".into())
+            })
+        );
+    }
+
+    #[test]
+    fn help_lists_goal() {
+        let text = help_text("saku");
+        assert!(text.contains("`saku goal <condition>`"));
+        assert!(text.contains("`saku goal`"));
     }
 
     #[test]

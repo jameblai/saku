@@ -26,12 +26,14 @@ pub(crate) struct LiveSession {
     pub abort_tx: Arc<Mutex<watch::Sender<bool>>>,
     pub run_control: Arc<Mutex<RunControl>>,
     pub background: Arc<BackgroundProcesses>,
+    pub goal_driver: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Shared Harness state.
 pub(crate) struct HarnessInner {
     pub workspace: PathBuf,
     pub data_dir: PathBuf,
+    pub global_skills_dir: PathBuf,
     pub default_model: String,
     pub default_effort: Effort,
     pub web_backend: String,
@@ -58,11 +60,20 @@ impl HarnessInner {
         };
         let abort = session.abort_tx.lock().await.subscribe();
         let cwd = session.snapshot().await.cwd;
+        let skill_roots = crate::skills::skill_base_dirs(
+            &crate::skills::load_skills(crate::skills::LoadSkillsOptions {
+                cwd: &cwd,
+                workspace: &self.workspace,
+                global_skills_dir: &self.global_skills_dir,
+            })
+            .skills,
+        );
         let ctx = ToolContext {
             session,
             workspace: &self.workspace,
             cwd,
             data_dir: &self.data_dir,
+            skill_roots,
             abort,
             progress: None,
         };
@@ -78,6 +89,15 @@ pub struct Harness {
 
 impl Harness {
     pub fn new(config: Config, provider: Arc<dyn Provider>) -> Result<Self, HarnessError> {
+        Self::with_global_skills_dir(config, provider, crate::skills::default_global_skills_dir())
+    }
+
+    /// Construct a Harness with an explicit global skills directory (tests / overrides).
+    pub fn with_global_skills_dir(
+        config: Config,
+        provider: Arc<dyn Provider>,
+        global_skills_dir: PathBuf,
+    ) -> Result<Self, HarnessError> {
         let search_index = Arc::new(SessionSearchIndex::open(&config.data_dir)?);
         let store =
             SessionStore::open(&config.data_dir)?.with_search_index(Arc::clone(&search_index));
@@ -87,6 +107,7 @@ impl Harness {
             inner: Arc::new(HarnessInner {
                 workspace: config.workspace,
                 data_dir: config.data_dir,
+                global_skills_dir,
                 default_model: config.default_model,
                 default_effort: config.default_effort,
                 web_backend: config.web_backend,
@@ -194,6 +215,7 @@ impl Harness {
                 abort_tx: Arc::clone(&live.abort_tx),
                 run_control: Arc::clone(&live.run_control),
                 background: Arc::clone(&live.background),
+                goal_driver: Arc::clone(&live.goal_driver),
             });
         }
         let loaded = self.inner.store.load_or_create(
@@ -207,6 +229,7 @@ impl Harness {
         let abort_tx = Arc::new(Mutex::new(abort_tx));
         let run_control = new_run_control();
         let background = Arc::new(BackgroundProcesses::new());
+        let goal_driver = Arc::new(std::sync::atomic::AtomicBool::new(false));
         sessions.insert(
             thread_id.clone(),
             LiveSession {
@@ -214,6 +237,7 @@ impl Harness {
                 abort_tx: Arc::clone(&abort_tx),
                 run_control: Arc::clone(&run_control),
                 background: Arc::clone(&background),
+                goal_driver: Arc::clone(&goal_driver),
             },
         );
         Ok(Session {
@@ -223,7 +247,22 @@ impl Harness {
             abort_tx,
             run_control,
             background,
+            goal_driver,
         })
+    }
+
+    /// Thread ids of persisted Sessions that currently have an active Goal.
+    ///
+    /// Used on bot startup to resume outer Goal loops (issue #50).
+    pub async fn sessions_with_active_goal(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for thread_id in self.inner.store.list_thread_ids() {
+            match self.inner.store.replay(&thread_id) {
+                Ok(state) if state.goal.is_some() => out.push(thread_id),
+                _ => {}
+            }
+        }
+        out
     }
 }
 

@@ -73,6 +73,17 @@ pub enum SessionEntry {
         cache_write: u64,
         cost_usd: f64,
     },
+    /// A Goal was set (or replaced); resets the outer loop run count.
+    GoalSet {
+        condition: String,
+    },
+    /// One Goal Evaluator verdict after a working Run.
+    GoalEvaluated {
+        met: bool,
+        reason: String,
+    },
+    /// Goal cleared explicitly (e.g. `saku stop`).
+    GoalCleared,
 }
 
 #[derive(Clone)]
@@ -101,6 +112,26 @@ impl SessionStore {
     /// Directory holding per-thread `<thread_id>.jsonl` files.
     pub fn sessions_dir(&self) -> &Path {
         &self.sessions_dir
+    }
+
+    /// Thread ids of all persisted Sessions (one `<thread_id>.jsonl` per Session).
+    ///
+    /// Discord snowflakes survive filename sanitization unchanged, so the file
+    /// stem is the thread id for Sessions created by the bot.
+    pub fn list_thread_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        let Ok(entries) = fs::read_dir(&self.sessions_dir) else {
+            return ids;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                ids.push(stem.to_string());
+            }
+        }
+        ids
     }
 
     pub fn path_for(&self, thread_id: &str) -> PathBuf {
@@ -149,6 +180,7 @@ impl SessionStore {
                 usage: TokenUsage::default(),
                 estimated_cost_usd: 0.0,
                 last_prompt_tokens: None,
+                goal: None,
             });
         }
         self.replay(thread_id)
@@ -180,6 +212,7 @@ impl SessionStore {
             usage: TokenUsage::default(),
             estimated_cost_usd: 0.0,
             last_prompt_tokens: None,
+            goal: None,
         };
 
         for line in lines {
@@ -251,6 +284,19 @@ impl SessionStore {
                     state.usage.add_assign(&delta);
                     state.estimated_cost_usd += cost_usd;
                     state.last_prompt_tokens = Some(delta.prompt_tokens());
+                }
+                SessionEntry::GoalSet { condition } => {
+                    state.goal = Some(crate::session::Goal {
+                        condition,
+                        run_count: 0,
+                        last_evaluator_reason: None,
+                    });
+                }
+                SessionEntry::GoalEvaluated { met, reason } => {
+                    crate::session::apply_goal_evaluated(&mut state.goal, met, &reason);
+                }
+                SessionEntry::GoalCleared => {
+                    state.goal = None;
                 }
             }
         }
@@ -358,6 +404,34 @@ impl SessionStore {
                 cost_usd,
             },
         )
+    }
+
+    pub fn append_goal_set(&self, thread_id: &str, condition: &str) -> Result<(), StoreError> {
+        self.append(
+            thread_id,
+            &SessionEntry::GoalSet {
+                condition: condition.into(),
+            },
+        )
+    }
+
+    pub fn append_goal_evaluated(
+        &self,
+        thread_id: &str,
+        met: bool,
+        reason: &str,
+    ) -> Result<(), StoreError> {
+        self.append(
+            thread_id,
+            &SessionEntry::GoalEvaluated {
+                met,
+                reason: reason.into(),
+            },
+        )
+    }
+
+    pub fn append_goal_cleared(&self, thread_id: &str) -> Result<(), StoreError> {
+        self.append(thread_id, &SessionEntry::GoalCleared)
     }
 
     fn append(&self, thread_id: &str, entry: &SessionEntry) -> Result<(), StoreError> {

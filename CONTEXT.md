@@ -41,6 +41,21 @@ One invocation of the Harness for a user message (or queued follow-up) until the
 _Avoid_: job, task, turn (turn = one LLM call inside a Run)
 
 
+**Usage Record**:
+One Provider-reported token measurement, attributed to its Usage Source and model. Persisted even when the enclosing operation later fails, is aborted, or reaches a limit.
+_Avoid_: usage event, billing entry
+
+
+**Usage Source**:
+Which Session-owned Provider activity produced a Usage Record: parent Run, Subagent, or Goal Evaluator.
+_Avoid_: caller, origin, tool name
+
+
+**Session Usage**:
+The aggregate of every Usage Record caused by a Session, including parent Runs, Subagents, and Goal Evaluators. Headline status totals combine all sources; source attribution remains available as a breakdown.
+_Avoid_: Run usage, parent usage, model usage
+
+
 **Subagent**:
 An isolated inner agent loop spawned by the parent Run via the `subagent` Tool. Gets its own mini-transcript (task string only — no parent history), inherits Project Context / Memory / Skills, and returns a summary to the parent. Modes: `explore` (read-only tools, default) or `edit` (full tools minus nested `subagent`). Depth 1 only; up to 4 parallel children per tool batch when all are `explore`.
 _Avoid_: Session, Background Process, delegate (as the tool name)
@@ -182,4 +197,3 @@ _Avoid_: Memory, Skill, context file (generic)
 **Effort**:
 The reasoning/thinking level sent to the current model (pi’s thinking levels: e.g. `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` where the model supports it). Available values depend on the selected model. Chosen per Session; new Sessions take model/Effort defaults from `config.toml`.
 _Avoid_: thinking (as the user-facing command name), temperature
-

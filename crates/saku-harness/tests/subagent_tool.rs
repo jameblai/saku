@@ -292,3 +292,26 @@ async fn subagent_model_and_effort_can_override_the_session() {
     assert_eq!(child.model, "gpt-5.4-mini");
     assert_eq!(child.effort, Effort::Low);
 }
+
+#[tokio::test]
+async fn subagent_normalizes_a_human_readable_model_name() {
+    let tmp = TempDir::new().unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    fake.push_tool_calls(vec![tool_call(
+        "child",
+        "subagent",
+        json!({"task": "use mini", "model": "GPT 5.4 Mini"}),
+    )]);
+    fake.push_text("summary");
+    fake.push_text("parent done");
+    let harness = Harness::new(test_config(&tmp), fake.clone()).unwrap();
+    harness.register_default_tools().await;
+    let session = harness.session("normalized-model").await.unwrap();
+    let _ = session
+        .run(UserTurn::text("delegate"))
+        .await
+        .collect()
+        .await;
+
+    assert_eq!(fake.requests()[1].model, "gpt-5.4-mini");
+}

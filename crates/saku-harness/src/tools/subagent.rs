@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use super::{Tool, ToolBatchPolicy, ToolContext, ToolError, ToolResult};
 use crate::config::Effort;
 use crate::path::resolve_in_workspace;
-use crate::provider::{is_allowed_model, is_supported_effort};
+use crate::provider::{ALLOWED_MODELS, is_allowed_model, is_supported_effort};
 use crate::types::{ContentPart, Message, ProviderEvent, Request, Role, ToolCall};
 
 const DEFAULT_MAX_TURNS: usize = 20;
@@ -64,7 +64,11 @@ impl Tool for SubagentTool {
                 "task": { "type": "string", "minLength": 1 },
                 "mode": { "type": "string", "enum": ["explore", "edit"], "default": "explore" },
                 "max_turns": { "type": "integer", "minimum": 1, "default": 20 },
-                "model": { "type": "string" },
+                "model": {
+                    "type": "string",
+                    "enum": ALLOWED_MODELS,
+                    "description": "Optional canonical model id; defaults to the Session model"
+                },
                 "effort": { "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh", "max"] }
             },
             "required": ["task"],
@@ -100,11 +104,15 @@ impl Tool for SubagentTool {
         }
 
         let parent = ctx.session.snapshot().await;
-        let model = args.model.unwrap_or(parent.model);
+        let model = args
+            .model
+            .map(|model| normalize_model_id(&model))
+            .unwrap_or(parent.model);
         let effort = args.effort.unwrap_or(parent.effort);
         if !is_allowed_model(&model) {
             return Ok(ToolResult::error(format!(
-                "unsupported subagent model `{model}`"
+                "unsupported subagent model `{model}`; allowed: {}",
+                ALLOWED_MODELS.join(", ")
             )));
         }
         if !is_supported_effort(&model, effort) {
@@ -240,8 +248,29 @@ impl Tool for SubagentTool {
     }
 }
 
+fn normalize_model_id(model: &str) -> String {
+    model.trim().to_ascii_lowercase().replace([' ', '_'], "-")
+}
+
 pub(crate) fn call_mode(arguments: &Value) -> Result<SubagentMode, String> {
     serde_json::from_value::<SubagentArgs>(arguments.clone())
         .map(|args| args.mode)
         .map_err(|error| format!("invalid subagent arguments: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schema_advertises_the_canonical_model_ids() {
+        let schema = SubagentTool::new().parameters_schema();
+        assert_eq!(schema["properties"]["model"]["enum"], json!(ALLOWED_MODELS));
+    }
+
+    #[test]
+    fn model_id_normalization_accepts_common_human_formatting() {
+        assert_eq!(normalize_model_id(" GPT 5.4 Mini "), "gpt-5.4-mini");
+        assert_eq!(normalize_model_id("gpt_5.6_sol"), "gpt-5.6-sol");
+    }
 }

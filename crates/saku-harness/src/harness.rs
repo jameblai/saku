@@ -95,6 +95,7 @@ impl HarnessInner {
             data_dir: &self.data_dir,
             system_prompt,
             skill_roots,
+            local_read_snapshots: None,
             abort,
             progress: None,
         };

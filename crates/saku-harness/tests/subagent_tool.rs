@@ -241,6 +241,39 @@ async fn explore_child_is_told_not_to_retry_unavailable_mutation_through_bash() 
 }
 
 #[tokio::test]
+async fn edit_child_uses_local_read_snapshots_without_authorizing_the_parent() {
+    let tmp = TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let path = config.workspace.join("note.txt");
+    std::fs::write(&path, "before").unwrap();
+    let fake = Arc::new(FakeProvider::new());
+    fake.push_tool_calls(vec![tool_call(
+        "child",
+        "subagent",
+        json!({"task": "update note", "mode": "edit"}),
+    )]);
+    fake.push_tool_calls(vec![tool_call("read", "read", json!({"path": "note.txt"}))]);
+    fake.push_tool_calls(vec![tool_call(
+        "edit",
+        "edit",
+        json!({"path": "note.txt", "old_string": "before", "new_string": "after"}),
+    )]);
+    fake.push_text("updated");
+    fake.push_text("parent done");
+    let harness = Harness::new(config, fake).unwrap();
+    harness.register_default_tools().await;
+    let session = harness.session("local-child-snapshots").await.unwrap();
+    let _ = session
+        .run(UserTurn::text("delegate"))
+        .await
+        .collect()
+        .await;
+
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "after");
+    assert!(session.snapshot().await.read_snapshots.is_empty());
+}
+
+#[tokio::test]
 async fn parallel_edit_batch_is_rejected_before_children_start() {
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());

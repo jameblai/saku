@@ -40,8 +40,7 @@ impl Tool for EditTool {
                 path.display()
             )));
         }
-        ctx.session
-            .assert_fresh_snapshot(&path)
+        ctx.assert_fresh_snapshot(&path)
             .await
             .map_err(ToolError::Message)?;
         let content =
@@ -57,8 +56,7 @@ impl Tool for EditTool {
         }
         let updated = content.replacen(&old, &new, 1);
         std::fs::write(&path, &updated).map_err(|e| ToolError::Message(e.to_string()))?;
-        ctx.session
-            .record_read_snapshot(&path)
+        ctx.record_read_snapshot(&path)
             .await
             .map_err(ToolError::Message)?;
         Ok(ok_text("ok"))

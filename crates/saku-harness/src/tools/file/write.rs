@@ -33,16 +33,14 @@ impl Tool for WriteTool {
         let content = arg_string(&args, "content")?;
         let path = resolve_tool_path(ctx.workspace, &ctx.cwd, &path_arg)?;
         if path.exists() {
-            ctx.session
-                .assert_fresh_snapshot(&path)
+            ctx.assert_fresh_snapshot(&path)
                 .await
                 .map_err(ToolError::Message)?;
         } else if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| ToolError::Message(e.to_string()))?;
         }
         std::fs::write(&path, &content).map_err(|e| ToolError::Message(e.to_string()))?;
-        ctx.session
-            .record_read_snapshot(&path)
+        ctx.record_read_snapshot(&path)
             .await
             .map_err(ToolError::Message)?;
         Ok(ok_text("ok"))

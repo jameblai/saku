@@ -111,6 +111,28 @@ pub struct ReadSnapshot {
     pub mtime_secs: i64,
 }
 
+impl ReadSnapshot {
+    pub(crate) fn capture(path: &Path) -> Result<Self, String> {
+        let (hash, mtime_secs) = file_fingerprint(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            hash,
+            mtime_secs,
+        })
+    }
+
+    pub(crate) fn assert_fresh(&self) -> Result<(), String> {
+        let (hash, mtime_secs) = file_fingerprint(&self.path)?;
+        if hash != self.hash || mtime_secs != self.mtime_secs {
+            return Err(format!(
+                "file changed since last read: {}",
+                self.path.display()
+            ));
+        }
+        Ok(())
+    }
+}
+
 struct QueuedRun {
     turn: UserTurn,
     tx: mpsc::UnboundedSender<RunEvent>,
@@ -169,12 +191,7 @@ impl Session {
 
     /// Record a Read Snapshot for `path` (fingerprint + Session Store append).
     pub async fn record_read_snapshot(&self, path: &Path) -> Result<(), String> {
-        let (hash, mtime_secs) = file_fingerprint(path)?;
-        let snapshot = ReadSnapshot {
-            path: path.to_path_buf(),
-            hash,
-            mtime_secs,
-        };
+        let snapshot = ReadSnapshot::capture(path)?;
         {
             let mut state = self.state.lock().await;
             if let Some(existing) = state
@@ -202,11 +219,7 @@ impl Session {
                 path.display()
             ));
         };
-        let (hash, mtime_secs) = file_fingerprint(path)?;
-        if hash != snap.hash || mtime_secs != snap.mtime_secs {
-            return Err(format!("file changed since last read: {}", path.display()));
-        }
-        Ok(())
+        snap.assert_fresh()
     }
 
     /// Idle / running / queued depth for `status`.

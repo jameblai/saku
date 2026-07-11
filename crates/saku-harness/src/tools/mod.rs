@@ -15,9 +15,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 use thiserror::Error;
-use tokio::sync::watch;
+use tokio::sync::{Mutex, watch};
 
-use crate::session::Session;
+use crate::session::{ReadSnapshot, Session};
 use crate::types::{ContentPart, ToolDefinition};
 
 pub use background::{BgListTool, BgLogsTool, BgStartTool, BgStopTool, background_tools};
@@ -84,9 +84,41 @@ pub struct ToolContext<'a> {
     /// Discovered Skill base directories allowlisted for `read` outside the Workspace.
     /// Bash has no path jail, so skill scripts/assets under these dirs are already reachable.
     pub skill_roots: Vec<PathBuf>,
+    /// Child-local snapshots. `None` uses the parent Session's persisted snapshots.
+    pub local_read_snapshots: Option<Arc<Mutex<Vec<ReadSnapshot>>>>,
     pub abort: watch::Receiver<bool>,
     /// Optional progress callback shape; Harness currently passes `None`.
     pub progress: Option<Box<dyn Fn(String) + Send + Sync + 'a>>,
+}
+
+impl ToolContext<'_> {
+    pub async fn record_read_snapshot(&self, path: &Path) -> Result<(), String> {
+        let Some(snapshots) = &self.local_read_snapshots else {
+            return self.session.record_read_snapshot(path).await;
+        };
+        let snapshot = ReadSnapshot::capture(path)?;
+        let mut snapshots = snapshots.lock().await;
+        if let Some(existing) = snapshots.iter_mut().find(|item| item.path == path) {
+            *existing = snapshot;
+        } else {
+            snapshots.push(snapshot);
+        }
+        Ok(())
+    }
+
+    pub async fn assert_fresh_snapshot(&self, path: &Path) -> Result<(), String> {
+        let Some(snapshots) = &self.local_read_snapshots else {
+            return self.session.assert_fresh_snapshot(path).await;
+        };
+        let snapshots = snapshots.lock().await;
+        let Some(snapshot) = snapshots.iter().find(|item| item.path == path) else {
+            return Err(format!(
+                "no Read Snapshot for {}; read the file before editing",
+                path.display()
+            ));
+        };
+        snapshot.assert_fresh()
+    }
 }
 
 #[async_trait]

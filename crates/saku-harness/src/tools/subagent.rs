@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use super::{Tool, ToolBatchPolicy, ToolContext, ToolError, ToolResult};
 use crate::config::Effort;
@@ -142,6 +144,7 @@ impl Tool for SubagentTool {
         let mut messages = vec![Message::user_text(args.task)];
         let mut partial = String::new();
         let mut child_cwd = ctx.cwd.clone();
+        let child_snapshots = Arc::new(Mutex::new(Vec::new()));
 
         for _ in 0..args.max_turns {
             if *ctx.abort.borrow() {
@@ -217,6 +220,7 @@ impl Tool for SubagentTool {
                         data_dir: ctx.data_dir,
                         system_prompt: ctx.system_prompt,
                         skill_roots: ctx.skill_roots.clone(),
+                        local_read_snapshots: Some(Arc::clone(&child_snapshots)),
                         abort: ctx.abort.clone(),
                         progress: None,
                     };

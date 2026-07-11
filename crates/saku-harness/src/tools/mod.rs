@@ -68,7 +68,8 @@ pub struct ToolContext<'a> {
     pub workspace: &'a Path,
     pub cwd: PathBuf,
     pub data_dir: &'a Path,
-    /// Discovered Skill base directories allowlisted for `read` (and skill assets via bash).
+    /// Discovered Skill base directories allowlisted for `read` outside the Workspace.
+    /// Bash has no path jail, so skill scripts/assets under these dirs are already reachable.
     pub skill_roots: Vec<PathBuf>,
     pub abort: watch::Receiver<bool>,
     /// Optional progress callback shape; Harness currently passes `None`.

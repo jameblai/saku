@@ -23,7 +23,7 @@ use crate::harness::HarnessInner;
 use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
 use crate::prompt::build_system_prompt_with_skills;
 use crate::provider::codex::models::{context_window_for, rates_for};
-use crate::skills::{LoadSkillsOptions, expand_skill_invocations, load_skills};
+use crate::skills::{LoadSkillsOptions, LoadSkillsResult, expand_skill_invocations, load_skills};
 use crate::status::{
     CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd,
 };
@@ -270,6 +270,7 @@ impl Session {
             workspace: &self.inner.workspace,
             global_skills_dir: &self.inner.global_skills_dir,
         });
+        log_skill_diagnostics(&skills);
         let system = build_system_prompt_with_skills(
             &self.inner.workspace,
             &state.cwd,
@@ -616,6 +617,7 @@ impl Session {
                 workspace: &self.inner.workspace,
                 global_skills_dir: &self.inner.global_skills_dir,
             });
+            log_skill_diagnostics(&discovered);
             turn.text = expand_skill_invocations(&turn.text, &discovered.skills);
         }
 
@@ -647,6 +649,7 @@ impl Session {
                     workspace: &self.inner.workspace,
                     global_skills_dir: &self.inner.global_skills_dir,
                 });
+                log_skill_diagnostics(&round_skills);
                 let system_probe = build_system_prompt_with_skills(
                     &self.inner.workspace,
                     &state.cwd,
@@ -923,6 +926,15 @@ fn mtime_secs(path: &Path) -> Result<i64, String> {
 fn hex_sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn log_skill_diagnostics(result: &LoadSkillsResult) {
+    for diag in &result.diagnostics {
+        match &diag.path {
+            Some(path) => eprintln!("saku skills: {} ({})", diag.message, path.display()),
+            None => eprintln!("saku skills: {}", diag.message),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

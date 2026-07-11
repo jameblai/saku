@@ -14,7 +14,7 @@ Session Usage includes every Provider turn caused by the Session: parent Runs, S
 
 `saku status` continues to show combined token and estimated-cost totals, followed by a compact cost breakdown for non-zero Usage Sources. Model attribution remains persisted for auditability but is not shown in the default status response.
 
-Historical usage entries without explicit source or model replay as `run` records and infer the model active at their position in the Session log. Legacy `cost_usd` fields remain readable for compatibility but are ignored; all estimates use current rates.
+Usage entries without an explicit source or model replay as `run` records and infer the model active at their position in the Session log. Cost is never read back from the log; all estimates use current rates.
 
 ## Consequences
 

@@ -73,7 +73,7 @@ async fn run_count_and_usage_persist_across_replay() {
 }
 
 #[tokio::test]
-async fn legacy_usage_replays_as_run_with_the_model_active_at_that_point() {
+async fn usage_without_source_replays_as_run_with_the_model_active_at_that_point() {
     let tmp = TempDir::new().unwrap();
     let cfg = config(&tmp);
     let harness = Harness::new(cfg.clone(), Arc::new(FakeProvider::new())).unwrap();
@@ -83,12 +83,12 @@ async fn legacy_usage_replays_as_run_with_the_model_active_at_that_point() {
     writeln!(file, r#"{{"type":"model_change","model":"gpt-5.4-mini"}}"#).unwrap();
     writeln!(
         file,
-        r#"{{"type":"usage","input":7,"output":2,"cache_read":1,"cache_write":0,"cost_usd":0.123}}"#
+        r#"{{"type":"usage","input":7,"output":2,"cache_read":1,"cache_write":0}}"#
     )
     .unwrap();
     writeln!(
         file,
-        r#"{{"type":"usage","input":99,"output":1,"cache_read":0,"cache_write":0,"cost_usd":0.0,"source":"subagent","model":"gpt-5.4-mini"}}"#
+        r#"{{"type":"usage","input":99,"output":1,"cache_read":0,"cache_write":0,"source":"subagent","model":"gpt-5.4-mini"}}"#
     )
     .unwrap();
 
@@ -103,7 +103,7 @@ async fn legacy_usage_replays_as_run_with_the_model_active_at_that_point() {
     assert_eq!(snapshot.usage_records[0].model, "gpt-5.4-mini");
     assert!(
         (snapshot.usage_by_source.run.estimated_cost_usd - 0.000014325).abs() < 1e-12,
-        "legacy stored cost must be ignored and repriced"
+        "cost must be derived from current rates"
     );
     assert_eq!(snapshot.usage_by_source.run.tokens.input, 7);
     assert_eq!(snapshot.usage_by_source.subagent.tokens.input, 99);

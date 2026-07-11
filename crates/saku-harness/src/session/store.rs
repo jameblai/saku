@@ -9,11 +9,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::config::Effort;
-use crate::provider::rates_for;
 use crate::session::search::extract_text;
 use crate::session::{ReadSnapshot, SessionSearchIndex, SessionState};
-use crate::status::estimate_cost_usd;
-use crate::types::{Message, Role, TokenUsage, UsageBySource, UsageRecord, UsageSource};
+use crate::types::{Message, Role, TokenUsage, UsageBySource, UsageSource};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -67,15 +65,12 @@ pub enum SessionEntry {
     },
     /// A Run started (including ones later aborted).
     RunStarted,
-    /// Token usage (+ estimated USD) accumulated for one Provider turn.
+    /// Token usage accumulated for one Provider turn, with its Usage Source and model.
     Usage {
         input: u64,
         output: u64,
         cache_read: u64,
         cache_write: u64,
-        /// Legacy persisted estimate; accepted on replay but never written.
-        #[serde(default, skip_serializing)]
-        cost_usd: Option<f64>,
         #[serde(default)]
         source: UsageSource,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,7 +282,6 @@ impl SessionStore {
                     output,
                     cache_read,
                     cache_write,
-                    cost_usd: _,
                     source,
                     model,
                 } => {
@@ -298,22 +292,7 @@ impl SessionStore {
                         cache_write,
                     };
                     let model = model.unwrap_or_else(|| state.model.clone());
-                    let cost_usd = rates_for(&model)
-                        .map(|rates| estimate_cost_usd(&delta, &rates))
-                        .unwrap_or(0.0);
-                    state.usage.add_assign(&delta);
-                    state.estimated_cost_usd += cost_usd;
-                    let source_usage = state.usage_by_source.get_mut(source);
-                    source_usage.tokens.add_assign(&delta);
-                    source_usage.estimated_cost_usd += cost_usd;
-                    state.usage_records.push(UsageRecord {
-                        source,
-                        model,
-                        tokens: delta,
-                    });
-                    if source == UsageSource::Run {
-                        state.last_prompt_tokens = Some(delta.prompt_tokens());
-                    }
+                    state.apply_usage(source, model, delta);
                 }
                 SessionEntry::GoalSet { condition } => {
                     state.goal = Some(crate::session::Goal {
@@ -432,7 +411,6 @@ impl SessionStore {
                 output: usage.output,
                 cache_read: usage.cache_read,
                 cache_write: usage.cache_write,
-                cost_usd: None,
                 source,
                 model: Some(model.into()),
             },

@@ -106,6 +106,30 @@ pub struct SessionState {
     pub goal: Option<Goal>,
 }
 
+impl SessionState {
+    /// Fold one Provider turn's usage into the aggregate totals, per-source
+    /// breakdown, and record log. Cost is derived from `model`'s current rates.
+    /// Shared by the live Run path and Session Store replay so the two never drift.
+    pub(crate) fn apply_usage(&mut self, source: UsageSource, model: String, delta: TokenUsage) {
+        let cost_usd = rates_for(&model)
+            .map(|rates| estimate_cost_usd(&delta, &rates))
+            .unwrap_or(0.0);
+        self.usage.add_assign(&delta);
+        self.estimated_cost_usd += cost_usd;
+        let source_usage = self.usage_by_source.get_mut(source);
+        source_usage.tokens.add_assign(&delta);
+        source_usage.estimated_cost_usd += cost_usd;
+        self.usage_records.push(UsageRecord {
+            source,
+            model,
+            tokens: delta,
+        });
+        if source == UsageSource::Run {
+            self.last_prompt_tokens = Some(delta.prompt_tokens());
+        }
+    }
+}
+
 /// Record of a file read for optimistic edits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadSnapshot {
@@ -969,27 +993,12 @@ impl Session {
         model: &str,
         usage: TokenUsage,
     ) -> Result<(), String> {
-        let cost = rates_for(model)
-            .map(|rates| estimate_cost_usd(&usage, &rates))
-            .unwrap_or(0.0);
         self.inner
             .store
             .append_usage(&self.thread_id, source, model, &usage)
             .map_err(|e| e.to_string())?;
         let mut state = self.state.lock().await;
-        state.usage.add_assign(&usage);
-        state.estimated_cost_usd += cost;
-        let source_usage = state.usage_by_source.get_mut(source);
-        source_usage.tokens.add_assign(&usage);
-        source_usage.estimated_cost_usd += cost;
-        state.usage_records.push(UsageRecord {
-            source,
-            model: model.into(),
-            tokens: usage,
-        });
-        if source == UsageSource::Run {
-            state.last_prompt_tokens = Some(usage.prompt_tokens());
-        }
+        state.apply_usage(source, model.into(), usage);
         Ok(())
     }
 }

@@ -4,6 +4,7 @@ pub mod background;
 pub mod file;
 pub mod memory;
 pub mod search;
+pub mod session_search;
 pub mod shell;
 pub mod subagent;
 pub mod web;
@@ -23,6 +24,7 @@ pub use background::{BgListTool, BgLogsTool, BgStartTool, BgStopTool, background
 pub use file::{EditTool, ReadTool, WriteTool, file_tools};
 pub use memory::{MemoryTool, memory_tools};
 pub use search::{FindTool, GrepTool, LsTool, search_tools};
+pub use session_search::{SessionSearchTool, session_search_tools};
 pub use shell::{BashTool, CdTool, shell_tools};
 pub use subagent::SubagentTool;
 pub use web::{register_web_tools, web_tools, web_tools_from_store};
@@ -79,6 +81,9 @@ pub struct ToolContext<'a> {
     pub data_dir: &'a Path,
     /// Exact System Prompt used for the parent Provider turn.
     pub system_prompt: &'a str,
+    /// Discovered Skill base directories allowlisted for `read` outside the Workspace.
+    /// Bash has no path jail, so skill scripts/assets under these dirs are already reachable.
+    pub skill_roots: Vec<PathBuf>,
     pub abort: watch::Receiver<bool>,
     /// Optional progress callback shape; Harness currently passes `None`.
     pub progress: Option<Box<dyn Fn(String) + Send + Sync + 'a>>,

@@ -3,13 +3,15 @@
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::config::Effort;
-use crate::session::{ReadSnapshot, SessionState};
-use crate::types::{Message, TokenUsage};
+use crate::session::search::extract_text;
+use crate::session::{ReadSnapshot, SessionSearchIndex, SessionState};
+use crate::types::{Message, Role, TokenUsage};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -71,18 +73,65 @@ pub enum SessionEntry {
         cache_write: u64,
         cost_usd: f64,
     },
+    /// A Goal was set (or replaced); resets the outer loop run count.
+    GoalSet {
+        condition: String,
+    },
+    /// One Goal Evaluator verdict after a working Run.
+    GoalEvaluated {
+        met: bool,
+        reason: String,
+    },
+    /// Goal cleared explicitly (e.g. `saku stop`).
+    GoalCleared,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SessionStore {
     sessions_dir: PathBuf,
+    /// Session Search index kept incrementally in sync on every append.
+    search_index: Option<Arc<SessionSearchIndex>>,
 }
 
 impl SessionStore {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self, StoreError> {
         let sessions_dir = data_dir.as_ref().join("sessions");
         fs::create_dir_all(&sessions_dir)?;
-        Ok(Self { sessions_dir })
+        Ok(Self {
+            sessions_dir,
+            search_index: None,
+        })
+    }
+
+    /// Attach a Session Search index; future appends keep it up to date.
+    pub fn with_search_index(mut self, index: Arc<SessionSearchIndex>) -> Self {
+        self.search_index = Some(index);
+        self
+    }
+
+    /// Directory holding per-thread `<thread_id>.jsonl` files.
+    pub fn sessions_dir(&self) -> &Path {
+        &self.sessions_dir
+    }
+
+    /// Thread ids of all persisted Sessions (one `<thread_id>.jsonl` per Session).
+    ///
+    /// Discord snowflakes survive filename sanitization unchanged, so the file
+    /// stem is the thread id for Sessions created by the bot.
+    pub fn list_thread_ids(&self) -> Vec<String> {
+        let mut ids = Vec::new();
+        let Ok(entries) = fs::read_dir(&self.sessions_dir) else {
+            return ids;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                ids.push(stem.to_string());
+            }
+        }
+        ids
     }
 
     pub fn path_for(&self, thread_id: &str) -> PathBuf {
@@ -131,6 +180,7 @@ impl SessionStore {
                 usage: TokenUsage::default(),
                 estimated_cost_usd: 0.0,
                 last_prompt_tokens: None,
+                goal: None,
             });
         }
         self.replay(thread_id)
@@ -162,6 +212,7 @@ impl SessionStore {
             usage: TokenUsage::default(),
             estimated_cost_usd: 0.0,
             last_prompt_tokens: None,
+            goal: None,
         };
 
         for line in lines {
@@ -234,6 +285,19 @@ impl SessionStore {
                     state.estimated_cost_usd += cost_usd;
                     state.last_prompt_tokens = Some(delta.prompt_tokens());
                 }
+                SessionEntry::GoalSet { condition } => {
+                    state.goal = Some(crate::session::Goal {
+                        condition,
+                        run_count: 0,
+                        last_evaluator_reason: None,
+                    });
+                }
+                SessionEntry::GoalEvaluated { met, reason } => {
+                    crate::session::apply_goal_evaluated(&mut state.goal, met, &reason);
+                }
+                SessionEntry::GoalCleared => {
+                    state.goal = None;
+                }
             }
         }
         Ok(state)
@@ -248,7 +312,19 @@ impl SessionStore {
                 tool_call_id: message.tool_call_id.clone(),
                 tool_calls: message.tool_calls.clone(),
             },
-        )
+        )?;
+        // Keep the Session Search index in sync: user/assistant text only.
+        if let Some(index) = &self.search_index
+            && matches!(message.role, Role::User | Role::Assistant)
+        {
+            let text = extract_text(&message.content);
+            if let Err(err) =
+                index.index_message(&self.path_for(thread_id), thread_id, message.role, &text)
+            {
+                eprintln!("session search index (message): {err}");
+            }
+        }
+        Ok(())
     }
 
     pub fn append_cwd(&self, thread_id: &str, cwd: &Path) -> Result<(), StoreError> {
@@ -299,7 +375,13 @@ impl SessionStore {
             &SessionEntry::Compaction {
                 summary: summary.into(),
             },
-        )
+        )?;
+        if let Some(index) = &self.search_index
+            && let Err(err) = index.index_compaction(&self.path_for(thread_id), thread_id, summary)
+        {
+            eprintln!("session search index (compaction): {err}");
+        }
+        Ok(())
     }
 
     pub fn append_run_started(&self, thread_id: &str) -> Result<(), StoreError> {
@@ -322,6 +404,34 @@ impl SessionStore {
                 cost_usd,
             },
         )
+    }
+
+    pub fn append_goal_set(&self, thread_id: &str, condition: &str) -> Result<(), StoreError> {
+        self.append(
+            thread_id,
+            &SessionEntry::GoalSet {
+                condition: condition.into(),
+            },
+        )
+    }
+
+    pub fn append_goal_evaluated(
+        &self,
+        thread_id: &str,
+        met: bool,
+        reason: &str,
+    ) -> Result<(), StoreError> {
+        self.append(
+            thread_id,
+            &SessionEntry::GoalEvaluated {
+                met,
+                reason: reason.into(),
+            },
+        )
+    }
+
+    pub fn append_goal_cleared(&self, thread_id: &str) -> Result<(), StoreError> {
+        self.append(thread_id, &SessionEntry::GoalCleared)
     }
 
     fn append(&self, thread_id: &str, entry: &SessionEntry) -> Result<(), StoreError> {

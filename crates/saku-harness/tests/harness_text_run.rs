@@ -89,6 +89,31 @@ async fn system_prompt_includes_memory() {
 }
 
 #[tokio::test]
+async fn system_prompt_injects_workspace_agents_md() {
+    let tmp = TempDir::new().unwrap();
+    let config = test_config(&tmp);
+    let nested = config.workspace.join("crates/foo");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(config.workspace.join("AGENTS.md"), "workspace rule").unwrap();
+    std::fs::write(nested.join("AGENTS.md"), "crate rule").unwrap();
+
+    let fake = Arc::new(FakeProvider::new());
+    fake.push_text("ok");
+    let harness = Harness::new(config.clone(), fake.clone()).unwrap();
+    let session = harness.session("t-agents").await.unwrap();
+    session.set_cwd(nested.clone()).await.unwrap();
+    let _ = session.run(UserTurn::text("ping")).await.collect().await;
+
+    let req = fake.last_request().expect("request recorded");
+    assert!(req.system.contains("<project_context>"));
+    assert!(req.system.contains("workspace rule"));
+    assert!(req.system.contains("crate rule"));
+    let ws_pos = req.system.find("workspace rule").expect("workspace");
+    let crate_pos = req.system.find("crate rule").expect("crate");
+    assert!(ws_pos < crate_pos, "root AGENTS.md before cwd AGENTS.md");
+}
+
+#[tokio::test]
 async fn provider_error_emits_run_error() {
     let tmp = TempDir::new().unwrap();
     let fake = Arc::new(FakeProvider::new());

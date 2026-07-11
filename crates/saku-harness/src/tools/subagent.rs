@@ -203,6 +203,7 @@ impl Tool for SubagentTool {
                         cwd: child_cwd.clone(),
                         data_dir: ctx.data_dir,
                         system_prompt: ctx.system_prompt,
+                        skill_roots: ctx.skill_roots.clone(),
                         abort: ctx.abort.clone(),
                         progress: None,
                     };

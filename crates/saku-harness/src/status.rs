@@ -84,9 +84,17 @@ pub struct StatusReport {
     pub background_exited: usize,
     /// Tool names currently registered on the Harness (registration order).
     pub tool_names: Vec<String>,
+    /// Discovered Skill names for the Session Working Directory (sorted).
+    pub skill_names: Vec<String>,
     /// Configured Web Backend id (e.g. `exa`).
     pub web_backend: String,
     pub web_status: WebBackendStatus,
+    /// Sessions currently in the Session Search index.
+    pub sessions_indexed: usize,
+    /// Active Session Goal, if any (issue #50).
+    pub goal: Option<crate::session::Goal>,
+    /// Loaded Project Context (`AGENTS.md`) paths for this Session Working Directory.
+    pub project_context_paths: Vec<PathBuf>,
 }
 
 /// Format a plain-text status reply (Discord-safe).
@@ -97,6 +105,14 @@ pub fn format_status(report: &StatusReport) -> String {
     out.push_str(&format!("Model: `{}`\n", report.model));
     out.push_str(&format!("Effort: `{}`\n", report.effort));
     out.push_str(&format!("Working Directory: `{}`\n", report.cwd.display()));
+    if report.project_context_paths.is_empty() {
+        out.push_str("Project Context: none\n");
+    } else {
+        out.push_str("Project Context:\n");
+        for path in &report.project_context_paths {
+            out.push_str(&format!("- `{}`\n", path.display()));
+        }
+    }
     match report.run_state {
         RunState::Running { waiting: 0 } => {
             out.push_str("Run state: running\n");
@@ -121,9 +137,36 @@ pub fn format_status(report: &StatusReport) -> String {
     ));
     out.push_str(&format!("Est. cost: ${:.4}\n", report.estimated_cost_usd));
 
+    if let Some(goal) = &report.goal {
+        out.push_str("\n**Goal**\n");
+        out.push_str(&format!("Condition: {}\n", goal.condition));
+        out.push_str(&format!(
+            "Run {}/{}\n",
+            goal.run_count,
+            crate::session::MAX_GOAL_RUNS
+        ));
+        if let Some(reason) = &goal.last_evaluator_reason {
+            out.push_str(&format!("Last reason: {reason}\n"));
+        }
+    }
+
     out.push_str("\n**Tools**\n");
     if !report.tool_names.is_empty() {
         let names: Vec<String> = report.tool_names.iter().map(|n| format!("`{n}`")).collect();
+        out.push_str(&names.join(" "));
+        out.push('\n');
+    }
+
+    out.push_str("\n**Skills**\n");
+    if report.skill_names.is_empty() {
+        out.push_str("(none)\n");
+    } else {
+        out.push_str(&format!("{}: ", report.skill_names.len()));
+        let names: Vec<String> = report
+            .skill_names
+            .iter()
+            .map(|n| format!("`{n}`"))
+            .collect();
         out.push_str(&names.join(" "));
         out.push('\n');
     }
@@ -172,6 +215,9 @@ pub fn format_status(report: &StatusReport) -> String {
     } else {
         out.push_str("Plan Usage unavailable\n");
     }
+
+    out.push_str("\n**Session Search**\n");
+    out.push_str(&format!("Sessions indexed: {}\n", report.sessions_indexed));
 
     out.push_str("\n**Web Backend**\n");
     out.push_str(&format!("Backend: `{}`\n", report.web_backend));
@@ -332,9 +378,54 @@ mod tests {
                 "bash".into(),
                 "web_search".into(),
             ],
+            skill_names: vec!["triage".into()],
             web_backend: "exa".into(),
             web_status: WebBackendStatus::NoCredential,
+            sessions_indexed: 18,
+            goal: None,
+            project_context_paths: Vec::new(),
         }
+    }
+
+    #[test]
+    fn format_status_shows_active_goal() {
+        let mut report = sample_report();
+        report.goal = Some(crate::session::Goal {
+            condition: "cargo test green".into(),
+            run_count: 7,
+            last_evaluator_reason: Some("two tests still failing".into()),
+        });
+        let text = format_status(&report);
+        assert!(text.contains("**Goal**"));
+        assert!(text.contains("Condition: cargo test green"));
+        assert!(text.contains("Run 7/20"));
+        assert!(text.contains("Last reason: two tests still failing"));
+    }
+
+    #[test]
+    fn format_status_omits_goal_section_when_inactive() {
+        let text = format_status(&sample_report());
+        assert!(!text.contains("**Goal**"));
+    }
+
+    #[test]
+    fn format_status_shows_none_when_no_project_context() {
+        let text = format_status(&sample_report());
+        assert!(text.contains("Project Context: none\n"));
+    }
+
+    #[test]
+    fn format_status_lists_loaded_project_context_paths() {
+        let mut report = sample_report();
+        report.project_context_paths = vec![
+            PathBuf::from("/home/james/ws/AGENTS.md"),
+            PathBuf::from("/home/james/ws/crates/foo/AGENTS.md"),
+        ];
+        let text = format_status(&report);
+        assert!(text.contains("Project Context:\n"));
+        assert!(text.contains("- `/home/james/ws/AGENTS.md`\n"));
+        assert!(text.contains("- `/home/james/ws/crates/foo/AGENTS.md`\n"));
+        assert!(!text.contains("Project Context: none"));
     }
 
     #[test]
@@ -365,9 +456,11 @@ mod tests {
         let text = format_status(&sample_report());
         let session_pos = text.find("**Session**").expect("Session");
         let tools_pos = text.find("**Tools**").expect("Tools");
+        let skills_pos = text.find("**Skills**").expect("Skills");
         let config_pos = text.find("**Config**").expect("Config");
-        assert!(session_pos < tools_pos && tools_pos < config_pos);
+        assert!(session_pos < tools_pos && tools_pos < skills_pos && skills_pos < config_pos);
         assert!(text.contains("`read` `edit` `write` `bash` `web_search`"));
+        assert!(text.contains("1: `triage`"));
     }
 
     #[test]

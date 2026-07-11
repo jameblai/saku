@@ -1,11 +1,13 @@
 //! Session Store, Session, and RunHandle.
 
+mod search;
 mod store;
 
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
 use futures::StreamExt;
@@ -21,18 +23,67 @@ use crate::compaction::{
 use crate::config::Effort;
 use crate::harness::HarnessInner;
 use crate::memory::{MEMORY_CHAR_LIMIT, read_memory};
-use crate::prompt::build_system_prompt;
+use crate::project_context::load_project_context;
+use crate::prompt::build_system_prompt_with_skills;
 use crate::provider::codex::models::{context_window_for, rates_for};
+use crate::skills::{LoadSkillsOptions, LoadSkillsResult, expand_skill_invocations, load_skills};
 use crate::status::{
     CodexAccountStatus, RunState, StatusReport, WebBackendStatus, estimate_cost_usd,
 };
 use crate::types::{
-    Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, UserTurn,
+    Message, ProviderEvent, Request, Role, RunEvent, TokenUsage, ToolCall, ToolDefinition, UserTurn,
 };
 
+pub use search::{DEFAULT_SEARCH_LIMIT, SearchError, SearchHit, SessionSearchIndex};
 pub use store::{SessionEntry, SessionHeader, SessionStore, StoreError};
 
+/// Replay-time application of a Goal Store entry to `goal` state.
+///
+/// Shared by [`SessionStore::replay`] and the live evaluation path so persisted
+/// and in-memory Goal state stay identical.
+pub(crate) fn apply_goal_evaluated(goal: &mut Option<Goal>, met: bool, reason: &str) {
+    let Some(g) = goal.as_mut() else { return };
+    g.run_count = g.run_count.saturating_add(1);
+    if met || g.run_count >= MAX_GOAL_RUNS {
+        *goal = None;
+    } else {
+        g.last_evaluator_reason = Some(reason.to_string());
+    }
+}
+
 const MAX_TOOL_ROUNDS: usize = 90;
+
+/// Fixed cap on Goal-driven Runs (not user-configurable in v1).
+pub const MAX_GOAL_RUNS: u32 = 20;
+
+/// Model + Effort for the Goal Evaluator (issue #50).
+const GOAL_EVALUATOR_MODEL: &str = "gpt-5.4-mini";
+const GOAL_EVALUATOR_EFFORT: Effort = Effort::Low;
+
+/// Active Session Goal: keep chaining Runs until the condition is met or
+/// `MAX_GOAL_RUNS` is exhausted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Goal {
+    /// The completion condition the user set via `saku goal <condition>`.
+    pub condition: String,
+    /// Number of working Runs completed and evaluated under this Goal.
+    pub run_count: u32,
+    /// Most recent Goal Evaluator reason (why the condition was not yet met).
+    pub last_evaluator_reason: Option<String>,
+}
+
+/// Outcome of one Goal Evaluator pass, driving the outer Goal loop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GoalDecision {
+    /// No Goal is active (nothing to evaluate).
+    Inactive,
+    /// Condition met — the Goal is cleared and achievement should be reported.
+    Achieved { condition: String, run: u32 },
+    /// Not met yet — run again with `message` as the continuation user turn.
+    Continue { message: String, run: u32 },
+    /// `MAX_GOAL_RUNS` exhausted without meeting the condition; Goal cleared.
+    Exhausted { condition: String, run: u32 },
+}
 
 /// In-memory Session state rebuilt from the Session Store.
 #[derive(Debug, Clone)]
@@ -48,6 +99,8 @@ pub struct SessionState {
     pub estimated_cost_usd: f64,
     /// Last Provider-reported prompt tokens (for context fill).
     pub last_prompt_tokens: Option<u64>,
+    /// Active Session Goal, if any (issue #50).
+    pub goal: Option<Goal>,
 }
 
 /// Record of a file read for optimistic edits.
@@ -78,6 +131,19 @@ pub struct Session {
     pub(crate) abort_tx: Arc<Mutex<watch::Sender<bool>>>,
     pub(crate) run_control: Arc<Mutex<RunControl>>,
     pub(crate) background: Arc<BackgroundProcesses>,
+    /// True while a Goal-driver loop owns this Session (single driver at a time).
+    pub(crate) goal_driver: Arc<AtomicBool>,
+}
+
+/// RAII marker that a Goal-driver loop owns a Session; releases on drop.
+pub struct GoalDriverGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl Drop for GoalDriverGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
 }
 
 impl Session {
@@ -203,7 +269,21 @@ impl Session {
         if memory.chars().count() > MEMORY_CHAR_LIMIT {
             memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
         }
-        let system = build_system_prompt(&self.inner.workspace, &state.cwd, &memory);
+        let skills = load_skills(LoadSkillsOptions {
+            cwd: &state.cwd,
+            workspace: &self.inner.workspace,
+            global_skills_dir: &self.inner.global_skills_dir,
+        });
+        log_skill_diagnostics(&skills);
+        let project_context = load_project_context(&self.inner.workspace, &state.cwd);
+        let project_context_paths = project_context.iter().map(|f| f.path.clone()).collect();
+        let system = build_system_prompt_with_skills(
+            &self.inner.workspace,
+            &state.cwd,
+            &memory,
+            state.goal.as_ref().map(|g| g.condition.as_str()),
+            &skills.skills,
+        );
         let estimated = estimate_tokens(&state.messages, &system) as u64;
         let (context_tokens, context_fill_percent) =
             context_fill_for(state.last_prompt_tokens, estimated, window);
@@ -217,6 +297,8 @@ impl Session {
             .into_iter()
             .map(|d| d.name)
             .collect();
+        let mut skill_names: Vec<String> = skills.skills.iter().map(|s| s.name.clone()).collect();
+        skill_names.sort();
         StatusReport {
             model: state.model,
             effort: state.effort,
@@ -236,8 +318,12 @@ impl Session {
             background_running: bg_running,
             background_exited: bg_exited,
             tool_names,
+            skill_names,
             web_backend: self.inner.web_backend.clone(),
             web_status,
+            sessions_indexed: self.inner.search_index.session_count().unwrap_or(0),
+            goal: state.goal,
+            project_context_paths,
         }
     }
 
@@ -258,16 +344,157 @@ impl Session {
     }
 
     /// Abort the active Run and drain the Session Run Queue.
+    ///
+    /// Also clears any active Goal: `saku stop` ends the outer Goal loop so no
+    /// auto-continuation Run is scheduled (issue #50).
     pub async fn stop(&self) {
         // `send_replace` (not `send`): abort receivers only exist while a tool is
         // executing. `watch::Sender::send` no-ops with zero receivers, which left
         // the flag stuck true after stop and made every follow-up Run abort.
         let _ = self.abort_tx.lock().await.send_replace(true);
-        let mut control = self.run_control.lock().await;
-        while let Some(queued) = control.queue.pop_front() {
-            let _ = queued.tx.send(RunEvent::RunAborted);
+        {
+            let mut control = self.run_control.lock().await;
+            while let Some(queued) = control.queue.pop_front() {
+                let _ = queued.tx.send(RunEvent::RunAborted);
+            }
+            control.pending_steer = None;
         }
-        control.pending_steer = None;
+        self.clear_goal().await;
+    }
+
+    /// Currently active Goal, if any.
+    pub async fn goal(&self) -> Option<Goal> {
+        self.state.lock().await.goal.clone()
+    }
+
+    /// Try to claim the single Goal-driver slot for this Session.
+    ///
+    /// Returns `None` if another driver loop already owns it, preventing two
+    /// concurrent outer loops (e.g. resume + replace) from chaining Runs at once.
+    pub fn try_become_goal_driver(&self) -> Option<GoalDriverGuard> {
+        if self
+            .goal_driver
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            Some(GoalDriverGuard {
+                flag: Arc::clone(&self.goal_driver),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Set (or replace) the active Goal. Replacing resets the run count.
+    pub async fn set_goal(&self, condition: &str) -> Result<(), String> {
+        {
+            let mut state = self.state.lock().await;
+            state.goal = Some(Goal {
+                condition: condition.to_string(),
+                run_count: 0,
+                last_evaluator_reason: None,
+            });
+        }
+        self.inner
+            .store
+            .append_goal_set(&self.thread_id, condition)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Clear the active Goal (persisted). No-op if no Goal is active.
+    pub async fn clear_goal(&self) {
+        let had_goal = {
+            let mut state = self.state.lock().await;
+            state.goal.take().is_some()
+        };
+        if had_goal {
+            let _ = self.inner.store.append_goal_cleared(&self.thread_id);
+        }
+    }
+
+    /// Run the Goal Evaluator over the current transcript and advance the outer
+    /// Goal loop. Records the verdict, updates run count / last reason, and
+    /// clears the Goal on achievement or exhaustion.
+    pub async fn evaluate_goal(&self) -> Result<GoalDecision, String> {
+        let condition = match self.state.lock().await.goal.as_ref() {
+            Some(g) => g.condition.clone(),
+            None => return Ok(GoalDecision::Inactive),
+        };
+
+        let (met, reason) = self
+            .run_goal_evaluator(&condition)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        self.inner
+            .store
+            .append_goal_evaluated(&self.thread_id, met, &reason)
+            .map_err(|e| e.to_string())?;
+
+        let mut state = self.state.lock().await;
+        // A concurrent `saku stop` may have cleared the Goal during evaluation.
+        if state.goal.is_none() {
+            return Ok(GoalDecision::Inactive);
+        }
+        // The Run number this verdict completes (1-based), captured before the
+        // Goal may be cleared by achievement/exhaustion.
+        let run = state.goal.as_ref().map(|g| g.run_count).unwrap_or(0) + 1;
+        apply_goal_evaluated(&mut state.goal, met, &reason);
+
+        if met {
+            Ok(GoalDecision::Achieved { condition, run })
+        } else if state.goal.is_none() {
+            Ok(GoalDecision::Exhausted { condition, run })
+        } else {
+            let message = continuation_message(&condition, &reason);
+            Ok(GoalDecision::Continue { message, run })
+        }
+    }
+
+    /// One Goal Evaluator Provider pass: judge the condition against the full
+    /// transcript via the `goal_check` Tool. Uses `gpt-5.4-mini` at low Effort.
+    async fn run_goal_evaluator(&self, condition: &str) -> Result<(bool, String), RunError> {
+        let mut messages = { self.state.lock().await.messages.clone() };
+        messages.push(Message::user_text(format!(
+            "Evaluate whether the following Goal has been met based on the conversation above.\n\n\
+             Goal: {condition}\n\n\
+             Call the `goal_check` tool with your verdict: `met` true only if the Goal is fully \
+             satisfied, and a short `reason`.",
+        )));
+
+        let request = Request {
+            system: GOAL_EVALUATOR_SYSTEM.to_string(),
+            messages,
+            tools: vec![goal_check_tool_def()],
+            model: GOAL_EVALUATOR_MODEL.to_string(),
+            effort: GOAL_EVALUATOR_EFFORT,
+        };
+
+        let mut stream = self.inner.provider.complete(request);
+        let mut verdict: Option<(bool, String)> = None;
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(ProviderEvent::ToolCall {
+                    name, arguments, ..
+                }) if name == "goal_check" => {
+                    let met = arguments
+                        .get("met")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let reason = arguments
+                        .get("reason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    verdict = Some((met, reason));
+                }
+                Ok(ProviderEvent::MessageComplete) => break,
+                Ok(ProviderEvent::Error(message)) => return Err(RunError::Evaluator(message)),
+                Err(err) => return Err(RunError::Evaluator(err.to_string())),
+                _ => {}
+            }
+        }
+        verdict.ok_or_else(|| RunError::Evaluator("evaluator did not call goal_check".into()))
     }
 
     /// Inject a mid-Run steer directive applied after the current tool batch.
@@ -380,7 +607,7 @@ impl Session {
 
     async fn execute_run(
         &self,
-        turn: UserTurn,
+        mut turn: UserTurn,
         tx: mpsc::UnboundedSender<RunEvent>,
     ) -> Result<(), RunError> {
         let _ = tx.send(RunEvent::RunStarted);
@@ -391,6 +618,15 @@ impl Session {
                 .store
                 .append_run_started(&self.thread_id)
                 .map_err(|e| RunError::Store(e.to_string()))?;
+
+            // Expand `$skill-name` against skills for the current Working Directory.
+            let discovered = load_skills(LoadSkillsOptions {
+                cwd: &state.cwd,
+                workspace: &self.inner.workspace,
+                global_skills_dir: &self.inner.global_skills_dir,
+            });
+            log_skill_diagnostics(&discovered);
+            turn.text = expand_skill_invocations(&turn.text, &discovered.skills);
         }
 
         {
@@ -409,13 +645,26 @@ impl Session {
                 return Ok(());
             }
 
-            let (model, effort, messages, cwd, workspace, data_dir, tools) = {
+            let (model, effort, messages, cwd, workspace, data_dir, tools, goal_condition) = {
                 let mut state = self.state.lock().await;
                 let mut memory = read_memory(&self.inner.data_dir).unwrap_or_default();
                 if memory.chars().count() > MEMORY_CHAR_LIMIT {
                     memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
                 }
-                let system_probe = build_system_prompt(&self.inner.workspace, &state.cwd, &memory);
+                let goal_condition = state.goal.as_ref().map(|g| g.condition.clone());
+                let round_skills = load_skills(LoadSkillsOptions {
+                    cwd: &state.cwd,
+                    workspace: &self.inner.workspace,
+                    global_skills_dir: &self.inner.global_skills_dir,
+                });
+                log_skill_diagnostics(&round_skills);
+                let system_probe = build_system_prompt_with_skills(
+                    &self.inner.workspace,
+                    &state.cwd,
+                    &memory,
+                    goal_condition.as_deref(),
+                    &round_skills.skills,
+                );
                 if estimate_tokens(&state.messages, &system_probe) > DEFAULT_COMPACTION_TOKEN_LIMIT
                     && let Some(result) = compact_messages(
                         &state.messages,
@@ -456,6 +705,7 @@ impl Session {
                     self.inner.workspace.clone(),
                     self.inner.data_dir.clone(),
                     tools,
+                    goal_condition,
                 )
             };
 
@@ -463,7 +713,18 @@ impl Session {
             if memory.chars().count() > MEMORY_CHAR_LIMIT {
                 memory = memory.chars().take(MEMORY_CHAR_LIMIT).collect();
             }
-            let system = build_system_prompt(&workspace, &cwd, &memory);
+            let round_skills = load_skills(LoadSkillsOptions {
+                cwd: &cwd,
+                workspace: &workspace,
+                global_skills_dir: &self.inner.global_skills_dir,
+            });
+            let system = build_system_prompt_with_skills(
+                &workspace,
+                &cwd,
+                &memory,
+                goal_condition.as_deref(),
+                &round_skills.skills,
+            );
             let model_for_usage = model.clone();
             let request = Request {
                 system: system.clone(),
@@ -739,10 +1000,61 @@ fn hex_sha256(bytes: &[u8]) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+fn log_skill_diagnostics(result: &LoadSkillsResult) {
+    for diag in &result.diagnostics {
+        match &diag.path {
+            Some(path) => eprintln!("saku skills: {} ({})", diag.message, path.display()),
+            None => eprintln!("saku skills: {}", diag.message),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum RunError {
     #[error("session store: {0}")]
     Store(String),
+    #[error("goal evaluator: {0}")]
+    Evaluator(String),
+}
+
+const GOAL_EVALUATOR_SYSTEM: &str = "You are the Goal Evaluator for Saku, a coding agent. \
+     Given a Session transcript and a Goal condition, judge whether the Goal is fully met. \
+     Be strict: only report `met: true` when the transcript shows the condition is actually \
+     satisfied (e.g. tests actually pass), not merely attempted. Always respond by calling the \
+     `goal_check` tool with `met` and a short `reason`.";
+
+/// The `goal_check` Tool definition offered to the Goal Evaluator.
+fn goal_check_tool_def() -> ToolDefinition {
+    ToolDefinition {
+        name: "goal_check".to_string(),
+        description: "Report whether the Goal condition is met, with a short reason.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "met": {
+                    "type": "boolean",
+                    "description": "True only if the Goal condition is fully satisfied."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Short explanation of the verdict (what remains if not met)."
+                }
+            },
+            "required": ["met", "reason"]
+        }),
+    }
+}
+
+/// Continuation user message for the next Goal Run: original condition + last reason.
+fn continuation_message(condition: &str, reason: &str) -> String {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        format!("Goal (not yet met): {condition}\n\nKeep working toward the Goal.")
+    } else {
+        format!(
+            "Goal (not yet met): {condition}\n\nGoal Evaluator reason: {reason}\n\nKeep working toward the Goal.",
+        )
+    }
 }
 
 /// Stream of [`RunEvent`]s for one Run.

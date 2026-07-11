@@ -10,41 +10,18 @@ pub struct ProjectContextFile {
     pub content: String,
 }
 
-/// Default global Project Context path: `~/.agents/AGENTS.md`.
-pub fn default_global_agents_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".agents").join("AGENTS.md"))
-}
-
 /// Discover `AGENTS.md` files for a Run.
 ///
-/// Order: optional global file first, then Workspace ancestors from root → cwd.
-/// The ancestor walk stops at the Workspace root (never climbs outside it).
-pub fn load_project_context(
-    workspace: &Path,
-    cwd: &Path,
-    global_agents: Option<&Path>,
-) -> Vec<ProjectContextFile> {
+/// Walks Workspace ancestors from root → cwd. Stops at the Workspace root
+/// (never climbs outside it). No home/global `AGENTS.md`.
+pub fn load_project_context(workspace: &Path, cwd: &Path) -> Vec<ProjectContextFile> {
     let mut files = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    if let Some(global) = global_agents
-        && let Some(file) = read_agents_md(global)
-    {
-        seen.insert(file.path.clone());
-        files.push(file);
-    }
-
     for dir in ancestor_dirs_within_workspace(workspace, cwd) {
         let candidate = dir.join("AGENTS.md");
-        if seen.contains(&candidate) {
-            continue;
-        }
         if let Some(file) = read_agents_md(&candidate) {
-            seen.insert(file.path.clone());
             files.push(file);
         }
     }
-
     files
 }
 
@@ -124,21 +101,18 @@ mod tests {
     fn missing_files_yield_empty() {
         let (_tmp, workspace) = setup_workspace();
         let cwd = workspace.join("crates/foo");
-        let files = load_project_context(&workspace, &cwd, None);
+        let files = load_project_context(&workspace, &cwd);
         assert!(files.is_empty());
     }
 
     #[test]
-    fn loads_global_then_ancestors_root_to_cwd() {
-        let (tmp, workspace) = setup_workspace();
-        let global = tmp.path().join("home/.agents/AGENTS.md");
-        fs::create_dir_all(global.parent().unwrap()).unwrap();
-        fs::write(&global, "global norms").unwrap();
+    fn loads_ancestors_root_to_cwd() {
+        let (_tmp, workspace) = setup_workspace();
         fs::write(workspace.join("AGENTS.md"), "workspace norms").unwrap();
         fs::write(workspace.join("crates/foo/AGENTS.md"), "crate norms").unwrap();
 
         let cwd = workspace.join("crates/foo");
-        let files = load_project_context(&workspace, &cwd, Some(&global));
+        let files = load_project_context(&workspace, &cwd);
 
         assert_eq!(
             files
@@ -146,7 +120,6 @@ mod tests {
                 .map(|f| (f.path.clone(), f.content.as_str()))
                 .collect::<Vec<_>>(),
             vec![
-                (global, "global norms"),
                 (workspace.join("AGENTS.md"), "workspace norms"),
                 (workspace.join("crates/foo/AGENTS.md"), "crate norms"),
             ]
@@ -155,18 +128,14 @@ mod tests {
 
     #[test]
     fn skips_missing_intermediate_agents_md() {
-        let (tmp, workspace) = setup_workspace();
-        let global = tmp.path().join("home/.agents/AGENTS.md");
-        fs::create_dir_all(global.parent().unwrap()).unwrap();
-        fs::write(&global, "global").unwrap();
+        let (_tmp, workspace) = setup_workspace();
         fs::write(workspace.join("AGENTS.md"), "workspace").unwrap();
-        // crates/ has no AGENTS.md; foo/ has none either — only global + workspace.
+        // crates/ and foo/ have no AGENTS.md — only workspace root.
 
         let cwd = workspace.join("crates/foo");
-        let files = load_project_context(&workspace, &cwd, Some(&global));
-        assert_eq!(files.len(), 2);
-        assert_eq!(files[0].content, "global");
-        assert_eq!(files[1].content, "workspace");
+        let files = load_project_context(&workspace, &cwd);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].content, "workspace");
     }
 
     #[test]
@@ -177,24 +146,22 @@ mod tests {
         fs::write(workspace.join("AGENTS.md"), "inside").unwrap();
 
         let cwd = workspace.join("crates/foo");
-        let files = load_project_context(&workspace, &cwd, None);
+        let files = load_project_context(&workspace, &cwd);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].content, "inside");
         assert!(!files.iter().any(|f| f.content.contains("outside")));
     }
 
     #[test]
-    fn cwd_outside_workspace_loads_only_global() {
+    fn cwd_outside_workspace_loads_nothing() {
         let (tmp, workspace) = setup_workspace();
         let outside = tmp.path().join("elsewhere");
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("AGENTS.md"), "should not load").unwrap();
-        let global = tmp.path().join("AGENTS.md");
-        fs::write(&global, "global only").unwrap();
+        fs::write(workspace.join("AGENTS.md"), "inside").unwrap();
 
-        let files = load_project_context(&workspace, &outside, Some(&global));
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].content, "global only");
+        let files = load_project_context(&workspace, &outside);
+        assert!(files.is_empty());
     }
 
     #[test]

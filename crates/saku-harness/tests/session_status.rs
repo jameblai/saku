@@ -193,12 +193,8 @@ async fn status_report_lists_project_context_paths() {
         )
         .await;
     assert_eq!(
-        report
-            .project_context_paths
-            .iter()
-            .filter(|p| p.ends_with("AGENTS.md") && p.starts_with(&cfg.workspace))
-            .collect::<Vec<_>>(),
-        vec![&cfg.workspace.join("AGENTS.md")]
+        report.project_context_paths,
+        vec![cfg.workspace.join("AGENTS.md")]
     );
     let text = format_status(&report);
     assert!(text.contains(&format!(

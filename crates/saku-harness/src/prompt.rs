@@ -3,8 +3,7 @@
 use std::path::Path;
 
 use crate::project_context::{
-    ProjectContextFile, default_global_agents_path, format_project_context_block,
-    load_project_context,
+    ProjectContextFile, format_project_context_block, load_project_context,
 };
 use crate::skills::Skill;
 
@@ -25,8 +24,7 @@ pub fn build_system_prompt_with_skills(
     goal: Option<&str>,
     skills: &[Skill],
 ) -> String {
-    let global = default_global_agents_path();
-    let context = load_project_context(workspace, cwd, global.as_deref());
+    let context = load_project_context(workspace, cwd);
     build_system_prompt_with_context(workspace, cwd, memory, goal, skills, &context)
 }
 
@@ -165,8 +163,14 @@ mod tests {
 
     #[test]
     fn omits_project_context_when_none_loaded() {
-        let text =
-            build_system_prompt_with_context(Path::new("/ws"), Path::new("/ws"), "", None, &[], &[]);
+        let text = build_system_prompt_with_context(
+            Path::new("/ws"),
+            Path::new("/ws"),
+            "",
+            None,
+            &[],
+            &[],
+        );
         assert!(!text.contains("<project_context>"));
     }
 

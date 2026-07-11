@@ -176,7 +176,7 @@ The fixed Harness instructions sent each Run (identity, Workspace/cwd, tool norm
 _Avoid_: persona doc, AGENTS.md (as the domain term — use Project Context)
 
 **Project Context**:
-Repository and personal norms from discovered `AGENTS.md` files, fully injected into the System Prompt each Run. Loaded from `~/.agents/AGENTS.md` (if present) plus every `AGENTS.md` in the Session Working Directory and its ancestors up to the Workspace root, ordered global first then root→cwd.
+Repository norms from discovered `AGENTS.md` files, fully injected into the System Prompt each Run. Loaded from every `AGENTS.md` in the Session Working Directory and its ancestors up to the Workspace root, ordered root→cwd (deeper/more specific last). No home-global `AGENTS.md`.
 _Avoid_: Memory, Skill, context file (generic)
 
 **Effort**:

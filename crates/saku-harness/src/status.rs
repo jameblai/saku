@@ -412,13 +412,13 @@ mod tests {
     fn format_status_lists_loaded_project_context_paths() {
         let mut report = sample_report();
         report.project_context_paths = vec![
-            PathBuf::from("/home/james/.agents/AGENTS.md"),
             PathBuf::from("/home/james/ws/AGENTS.md"),
+            PathBuf::from("/home/james/ws/crates/foo/AGENTS.md"),
         ];
         let text = format_status(&report);
         assert!(text.contains("Project Context:\n"));
-        assert!(text.contains("- `/home/james/.agents/AGENTS.md`\n"));
         assert!(text.contains("- `/home/james/ws/AGENTS.md`\n"));
+        assert!(text.contains("- `/home/james/ws/crates/foo/AGENTS.md`\n"));
         assert!(!text.contains("Project Context: none"));
     }
 

@@ -8,7 +8,7 @@ description = "Saku agent harness: tools, provider, session store, credentials"
 
 [dependencies]
 async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 dirs = "6"
 libc = "0.2"
 fff-search = "0.9.7-nightly.b4590ca"

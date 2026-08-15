@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cross
-      - uses: Swatinem/rust-cache@v2.9.1
+      - uses: Swatinem/rust-cache@v2.9.2
       - run: cross build --release -p saku --target ${{ matrix.target }}
       - run: |
           mkdir dist
